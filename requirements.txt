@@ -1,0 +1,21 @@
+# String Matching & Fuzzy Search
+python-Levenshtein
+rapidfuzz==3.6.1
+
+# HTTP Requests (for OSM Nominatim geocoding)
+requests>=2.28.0
+
+# Database
+# SQLite is built-in to Python, no package needed
+
+# Utilities
+python-dotenv==1.0.0
+
+
+# Optional: CLI formatting (for demo.py)
+# No external packages needed - using built-in print
+
+# Web Scraping (for crawl_admin_division.py)
+selenium>=4.0.0
+webdriver-manager>=4.0.0
+pandas>=2.0.0
