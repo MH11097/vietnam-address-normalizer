@@ -11,11 +11,11 @@ from .text_utils import (
 
 from .matching_utils import (
     exact_match,
-    fuzzy_match,
-    fuzzy_match_single,
-    multi_level_match,
-    get_best_fuzzy_match,
     is_substring_match,
+    ensemble_fuzzy_score,
+    levenshtein_normalized,
+    jaccard_similarity,
+    token_sort_ratio,
 )
 
 __all__ = [
@@ -25,11 +25,11 @@ __all__ = [
     'expand_abbreviations',
     'normalize_unicode',
     'remove_special_chars',
-    # Matching utilities
+    # Matching utilities (simplified)
     'exact_match',
-    'fuzzy_match',
-    'fuzzy_match_single',
-    'multi_level_match',
-    'get_best_fuzzy_match',
     'is_substring_match',
+    'ensemble_fuzzy_score',
+    'levenshtein_normalized',
+    'jaccard_similarity',
+    'token_sort_ratio',
 ]

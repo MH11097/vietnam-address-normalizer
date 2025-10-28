@@ -214,10 +214,10 @@ def parse_goong_to_candidates(goong_result: Dict[str, Any]) -> List[Dict[str, An
             'goong_place_id': prediction.get('place_id', ''),
             'goong_rank': idx + 1,
             'interpretation': description,
-            # Scores (use confidence as proxy)
-            'province_score': base_confidence * 100 if province_norm else 0,
-            'district_score': base_confidence * 100 if district_norm else 0,
-            'ward_score': base_confidence * 100 if ward_norm else 0,
+            # Scores (use confidence as proxy - already 0-1)
+            'province_score': base_confidence if province_norm else 0,
+            'district_score': base_confidence if district_norm else 0,
+            'ward_score': base_confidence if ward_norm else 0,
         }
 
         candidates.append(candidate)

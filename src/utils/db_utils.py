@@ -3,10 +3,14 @@ Database utilities for SQLite operations.
 Provides connection management, query helpers, and data loading.
 """
 import sqlite3
+import time
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 from functools import lru_cache
+
+logger = logging.getLogger(__name__)
 
 
 # Database path (relative to project root)
@@ -57,11 +61,30 @@ def query_one(query: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
         >>> query_one("SELECT * FROM admin_divisions WHERE id = ?", (1,))
         {'id': 1, 'province_full': 'THÀNH PHỐ HÀ NỘI', ...}
     """
+    from ..config import DEBUG_SQL
+
+    start_time = time.time() if DEBUG_SQL else 0
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
+
+        if DEBUG_SQL:
+            # Log query and params
+            query_preview = query.replace('\n', ' ').strip()
+           
+            logger.debug(f"[SQL] {query_preview}")
+            logger.debug(f"[SQL] Params: {params}")
+
         cursor.execute(query, params)
         row = cursor.fetchone()
-        return dict(row) if row else None
+        result = dict(row) if row else None
+
+        if DEBUG_SQL:
+            elapsed_ms = (time.time() - start_time) * 1000
+            result_str = "1 row" if result else "0 rows"
+            logger.debug(f"[SQL] → {result_str} | {elapsed_ms:.1f}ms")
+
+        return result
 
 
 def query_all(query: str, params: tuple = ()) -> List[Dict[str, Any]]:
@@ -79,17 +102,59 @@ def query_all(query: str, params: tuple = ()) -> List[Dict[str, Any]]:
         >>> query_all("SELECT * FROM abbreviations LIMIT 5")
         [{'id': 1, 'key': 'hbt', 'word': 'hai ba trung'}, ...]
     """
+    from ..config import DEBUG_SQL
+
+    start_time = time.time() if DEBUG_SQL else 0
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+
+        if DEBUG_SQL:
+            # Log query and params
+            query_preview = query.replace('\n', ' ').strip()
+            if len(query_preview) > 150:
+                query_preview = query_preview[:150] + "..."
+            logger.debug(f"[SQL] {query_preview}")
+            if params:
+                logger.debug(f"[SQL] Params: {params}")
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        result = [dict(row) for row in rows]
+
+        if DEBUG_SQL:
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.debug(f"[SQL] → {len(result)} rows | {elapsed_ms:.1f}ms")
+
+        return result
+
+
+def execute_query(query: str, params: tuple = ()) -> int:
+    """
+    Execute UPDATE/INSERT/DELETE query and return number of affected rows.
+
+    Args:
+        query: SQL query string (UPDATE/INSERT/DELETE)
+        params: Query parameters (tuple)
+
+    Returns:
+        Number of rows affected
+
+    Example:
+        >>> execute_query("UPDATE admin_divisions SET province_name_normalized = ? WHERE id = ?", ('ha noi', 1))
+        1
+    """
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(query, params)
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        return cursor.rowcount
 
 
 @lru_cache(maxsize=128)
 def load_abbreviations(province_context: Optional[str] = None) -> Dict[str, str]:
     """
     Load abbreviations from database with optional province context.
+    Priority: Context-specific > Global (context-specific overwrites global for same key)
     Cached for performance.
 
     Args:
@@ -107,22 +172,115 @@ def load_abbreviations(province_context: Optional[str] = None) -> Dict[str, str]
         'ha noi'
 
         >>> abbr_hn = load_abbreviations('ha noi')  # Global + Hanoi-specific
-        >>> abbr_hn['ttri']
-        'thanh tri'
+        >>> abbr_hn['tx']
+        'thanh xuan'  # Context-specific (ha noi) overrides generic 'thi xa'
     """
-    if province_context:
-        # Load global + province-specific abbreviations
-        query = """
-            SELECT key, word FROM abbreviations
-            WHERE province_context IS NULL OR province_context = ?
-        """
-        rows = query_all(query, (province_context,))
-    else:
-        # Load only global abbreviations (no province context)
-        query = "SELECT key, word FROM abbreviations WHERE province_context IS NULL"
-        rows = query_all(query)
+    result = {}
 
-    return {row['key']: row['word'] for row in rows}
+    # Step 1: Load global abbreviations first (lower priority)
+    query_global = "SELECT key, word FROM abbreviations WHERE province_context IS NULL"
+    rows_global = query_all(query_global)
+    for row in rows_global:
+        result[row['key']] = row['word']
+
+    # Step 2: Load context-specific abbreviations (higher priority - overwrites global)
+    if province_context:
+        query_context = """
+            SELECT key, word FROM abbreviations
+            WHERE province_context = ?
+        """
+        rows_context = query_all(query_context, (province_context,))
+        for row in rows_context:
+            result[row['key']] = row['word']  # Overwrite global if exists
+
+    return result
+
+
+def expand_abbreviation_from_admin(
+    abbr: str,
+    level: str = 'ward',
+    province_context: Optional[str] = None
+) -> Optional[str]:
+    """
+    Expand abbreviation using admin_divisions table.
+
+    Args:
+        abbr: Abbreviation to expand (e.g., "tx", "bd")
+        level: Level to search - 'ward', 'district', or 'province'
+        province_context: Province context for disambiguation (recommended for ward/district)
+
+    Returns:
+        Expanded name (normalized) or None if not found
+
+    Example:
+        >>> expand_abbreviation_from_admin('tx', 'ward', 'ca mau')
+        'tan xuyen'
+        >>> expand_abbreviation_from_admin('tx', 'ward', 'ha noi')
+        'thanh xuan'
+        >>> expand_abbreviation_from_admin('bd', 'district', 'ha noi')
+        'ba dinh'
+    """
+    if not abbr or level not in ['province', 'district', 'ward']:
+        return None
+
+    abbr = abbr.lower().strip()
+
+    # Build query based on level
+    if level == 'province':
+        query = """
+            SELECT DISTINCT province_name_normalized
+            FROM admin_divisions
+            WHERE province_abbreviation = ?
+            LIMIT 1
+        """
+        params = (abbr,)
+
+    elif level == 'district':
+        if province_context:
+            query = """
+                SELECT DISTINCT district_name_normalized
+                FROM admin_divisions
+                WHERE district_abbreviation = ?
+                  AND province_name_normalized = ?
+                LIMIT 1
+            """
+            params = (abbr, province_context)
+        else:
+            query = """
+                SELECT DISTINCT district_name_normalized
+                FROM admin_divisions
+                WHERE district_abbreviation = ?
+                LIMIT 1
+            """
+            params = (abbr,)
+
+    else:  # ward
+        if province_context:
+            query = """
+                SELECT DISTINCT ward_name_normalized
+                FROM admin_divisions
+                WHERE ward_abbreviation = ?
+                  AND province_name_normalized = ?
+                LIMIT 1
+            """
+            params = (abbr, province_context)
+        else:
+            query = """
+                SELECT DISTINCT ward_name_normalized
+                FROM admin_divisions
+                WHERE ward_abbreviation = ?
+                LIMIT 1
+            """
+            params = (abbr,)
+
+    result = query_one(query, params)
+
+    if result:
+        # Return the first column value
+        col_name = f"{level}_name_normalized"
+        return result.get(col_name)
+
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -247,6 +405,11 @@ def find_exact_match(
         >>> find_exact_match('ha noi', None, None)
         None  # Prevents random results
     """
+    from ..config import DEBUG_SQL
+
+    if DEBUG_SQL:
+        logger.debug(f"[SQL] find_exact_match(province={province}, district={district}, ward={ward})")
+
     conditions = []
     params = []
 
@@ -263,6 +426,8 @@ def find_exact_match(
     # IMPORTANT: Require at least 2 conditions to prevent random results
     # If only province is provided, we would get arbitrary ward/district
     if len(conditions) < 2:
+        if DEBUG_SQL:
+            logger.debug(f"[SQL] → None (requires at least 2 components)")
         return None
 
     query = f"""
@@ -272,7 +437,31 @@ def find_exact_match(
     LIMIT 1
     """
 
-    return query_one(query, tuple(params))
+    result = query_one(query, tuple(params))
+
+    if result:
+        # Clear fields that weren't queried to prevent using random LIMIT 1 values
+        if not ward:
+            result['ward_full'] = None
+            result['ward_name'] = None
+            result['ward_name_normalized'] = None
+        if not district:
+            result['district_full'] = None
+            result['district_name'] = None
+            result['district_name_normalized'] = None
+
+        if DEBUG_SQL:
+            # Only show components that were actually queried
+            parts = []
+            if province:
+                parts.append(result.get('province_full', ''))
+            if district:
+                parts.append(result.get('district_full', ''))
+            if ward:
+                parts.append(result.get('ward_full', ''))
+            logger.debug(f"[SQL] → Match found: {' / '.join(parts)}")
+
+    return result
 
 
 def get_candidates_scoped(
@@ -344,6 +533,16 @@ def validate_hierarchy(
         >>> validate_hierarchy('ha noi', 'district1', 'ward2')
         False
     """
+    from ..config import DEBUG_SQL
+
+    if DEBUG_SQL:
+        components = [province]
+        if district:
+            components.append(district)
+        if ward:
+            components.append(ward)
+        logger.debug(f"[SQL] validate_hierarchy({' > '.join(components)})")
+
     conditions = ["province_name_normalized = ?"]
     params = [province]
 
@@ -360,7 +559,12 @@ def validate_hierarchy(
     """
 
     result = query_one(query, tuple(params))
-    return result['count'] > 0 if result else False
+    is_valid = result['count'] > 0 if result else False
+
+    if DEBUG_SQL:
+        logger.debug(f"[SQL] → {'✓ Valid' if is_valid else '✗ Invalid'}")
+
+    return is_valid
 
 
 def get_districts_by_province(province: str) -> List[Dict[str, Any]]:

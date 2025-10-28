@@ -1,16 +1,85 @@
 """
-Address Parsing Pipeline - Orchestrates all 5 phases
+Address Parsing Pipeline - Orchestrates all 6 phases
 
 Simple pipeline that chains:
-Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5
+Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6
 """
 from typing import Dict, Any
 import time
 from .processors import phase1_preprocessing
-from .processors import phase2_extraction
-from .processors import phase3_candidates
-from .processors import phase4_validation
-from .processors import phase5_postprocessing
+from .processors import phase2_structural
+from .processors import phase3_extraction
+from .processors import phase4_candidates
+from .processors import phase5_validation
+from .processors import phase6_postprocessing
+
+
+def _build_phase3_from_structural(phase2_result: Dict[str, Any], phase1_result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build Phase 3-compatible result from Phase 2 structural parsing.
+
+    Phase 3 expects candidates list, so we create a single high-confidence candidate
+    from the structural parsing result.
+
+    Args:
+        phase2_result: Result from Phase 2 structural parsing
+        phase1_result: Result from Phase 1 (for normalized text)
+
+    Returns:
+        Phase 2-compatible result with candidates list
+    """
+    # Lookup full administrative names from database
+    from .utils.extraction_utils import lookup_full_names
+
+    province = phase2_result.get('province')
+    district = phase2_result.get('district')
+    ward = phase2_result.get('ward')
+
+    province_full, district_full, ward_full = lookup_full_names(province, district, ward)
+
+    # Build single candidate from structural result
+    match_level = sum([
+        1 if province else 0,
+        1 if district else 0,
+        1 if ward else 0
+    ])
+
+    candidate = {
+        'ward': ward,
+        'district': district,
+        'province': province,
+        'ward_full': ward_full,
+        'district_full': district_full,
+        'province_full': province_full,
+        'ward_score': 95 if ward else 0,
+        'district_score': 95 if district else 0,
+        'province_score': 100 if province else 0,
+        'confidence': phase2_result['confidence'],
+        'source': f"structural_{phase2_result['method']}",
+        'hierarchy_valid': True,  # Assume valid from structural parsing
+        'match_level': match_level,
+        'at_rule': match_level,  # at_rule equals match_level for structural results
+        'match_type': 'exact',  # Structural parsing produces exact matches
+        'final_confidence': phase2_result['confidence']
+    }
+
+    return {
+        'candidates': [candidate] if candidate['match_level'] > 0 else [],
+        'processing_time_ms': phase2_result['processing_time_ms'],
+        'geographic_known_used': phase2_result.get('province') is not None,
+        'original_address': phase1_result.get('original', ''),
+        'potential_provinces': [],
+        'potential_districts': [],
+        'potential_wards': [],
+        'potential_streets': [],
+        'province': phase2_result.get('province'),
+        'district': phase2_result.get('district'),
+        'ward': phase2_result.get('ward'),
+        'province_score': 100 if phase2_result.get('province') else 0,
+        'district_score': 95 if phase2_result.get('district') else 0,
+        'ward_score': 95 if phase2_result.get('ward') else 0,
+        'normalized_text': phase1_result.get('normalized', '')
+    }
 
 
 class AddressPipeline:
@@ -71,32 +140,49 @@ class AddressPipeline:
             phase1_result = phase1_preprocessing.preprocess(raw_address, province_known=province_known)
             phase_results['phase1'] = phase1_result
 
-            # Phase 2: Extraction (với known values)
-            phase2_result = phase2_extraction.extract_components(
-                phase1_result,
+            # Phase 2: Structural Parsing
+            # Try to parse using separators and keywords first
+            phase2_result = phase2_structural.structural_parse(
+                phase1_result['normalized'],
                 province_known=province_known,
                 district_known=district_known
             )
             phase_results['phase2'] = phase2_result
 
-            # Phase 3: Candidate Generation
-            # Pass Phase 2 result directly (contains candidates list)
-            phase3_result = phase3_candidates.generate_candidates(phase2_result)
-            phase_results['phase3'] = phase3_result
+            # Decision: Use structural result or fallback to n-gram?
+            if phase2_result['confidence'] >= 0.75:
+                # High confidence structural parsing → skip n-gram extraction
+                # Build Phase 3 result from structural parsing
+                phase3_result = _build_phase3_from_structural(phase2_result, phase1_result)
+                phase_results['phase3'] = phase3_result
+            else:
+                # Low confidence or no structure → use n-gram extraction
+                phase3_result = phase3_extraction.extract_components(
+                    phase1_result,
+                    province_known=province_known,
+                    district_known=district_known
+                )
+                phase_results['phase3'] = phase3_result
 
-            # Phase 4: Validation & Ranking
-            phase4_result = phase4_validation.validate_and_rank(phase3_result)
+            # Phase 4: Candidate Generation
+            # Pass Phase 3 result directly (contains candidates list)
+            phase4_result = phase4_candidates.generate_candidates(phase3_result)
             phase_results['phase4'] = phase4_result
 
-            # Phase 5: Post-processing
+            # Phase 5: Validation & Ranking
+            phase5_result = phase5_validation.validate_and_rank(phase4_result)
+            phase_results['phase5'] = phase5_result
+
+            # Phase 6: Post-processing
             # Extract remaining address
-            best_match = phase4_result.get('best_match', {})
-            remaining_address = phase5_postprocessing.extract_remaining_address(
-                raw_address,
+            best_match = phase5_result.get('best_match', {})
+            normalized_tokens = best_match.get('normalized_tokens', [])
+            remaining_address = phase6_postprocessing.extract_remaining_address(
+                normalized_tokens,
                 {
-                    'province': best_match.get('province', ''),
-                    'district': best_match.get('district', ''),
-                    'ward': best_match.get('ward', '')
+                    'province': best_match.get('province_tokens', (-1, -1)),
+                    'district': best_match.get('district_tokens', (-1, -1)),
+                    'ward': best_match.get('ward_tokens', (-1, -1))
                 }
             )
 
@@ -105,15 +191,15 @@ class AddressPipeline:
                 'original': raw_address
             }
 
-            phase5_result = phase5_postprocessing.postprocess(
-                phase4_result,
+            phase6_result = phase6_postprocessing.postprocess(
+                phase5_result,
                 extraction_metadata
             )
-            phase_results['phase5'] = phase5_result
+            phase_results['phase6'] = phase6_result
 
             # Extract final output
-            final_output = phase5_result['formatted_output']
-            quality_flag = phase5_result['quality_flag']
+            final_output = phase6_result['formatted_output']
+            quality_flag = phase6_result['quality_flag']
 
             # Determine status
             status = 'success' if quality_flag != 'failed' else 'failed'

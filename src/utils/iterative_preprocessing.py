@@ -29,8 +29,11 @@ Speedup: Only re-run if province_context changes (cached)
 """
 from typing import Dict, Any, Optional
 import time
+import logging
 from functools import lru_cache
 from .text_utils import normalize_address, expand_abbreviations
+
+logger = logging.getLogger(__name__)
 
 
 def iterative_preprocess(
@@ -69,6 +72,12 @@ def iterative_preprocess(
     """
     start_time = time.time()
 
+    logger.debug("[🔍 DEBUG] " + "═" * 76)
+    logger.debug("[🔍 DEBUG] [PHASE 1] TIỀN XỬ LÝ (Iterative)")
+    logger.debug(f"[🔍 DEBUG]   📥 Input: '{raw_address}'")
+    logger.debug(f"[🔍 DEBUG]   📝 Known: province={province_known or 'None'}, district={district_known or 'None'}")
+    logger.debug(f"[🔍 DEBUG]   🔧 Tác vụ: Iterative preprocessing (max {max_iterations} iterations)")
+
     from .text_utils import normalize_hint
 
     # Normalize known values
@@ -82,12 +91,17 @@ def iterative_preprocess(
     current_district = district_context
 
     for iteration in range(1, max_iterations + 1):
+        logger.debug(f"\n[🔍 DEBUG]   ─── Iteration {iteration} ───")
+        logger.debug(f"[🔍 DEBUG]   Context: province='{current_province or 'None'}', district='{current_district or 'None'}'")
+
         # === ITERATION N: Preprocess with current context ===
         iter_result = _preprocess_single_pass(
             raw_address,
             current_province,
             current_district
         )
+
+        logger.debug(f"[🔍 DEBUG]   📤 Normalized: '{iter_result['normalized']}'")
 
         # Store iteration data
         iter_result['iteration'] = iteration
@@ -103,6 +117,8 @@ def iterative_preprocess(
         new_province = extracted.get('province')
         new_district = extracted.get('district')
 
+        logger.debug(f"[🔍 DEBUG]   🔍 Discovered: province='{new_province or 'None'}', district='{new_district or 'None'}'")
+
         # Update context for next iteration
         province_improved = False
         district_improved = False
@@ -110,18 +126,22 @@ def iterative_preprocess(
         if new_province and new_province != current_province:
             current_province = new_province
             province_improved = True
+            logger.debug(f"[🔍 DEBUG]   ✓ Province context updated: '{current_province}'")
 
         if new_district and new_district != current_district:
             current_district = new_district
             district_improved = True
+            logger.debug(f"[🔍 DEBUG]   ✓ District context updated: '{current_district}'")
 
         # Early stopping: If no improvement in context, stop
         if not province_improved and not district_improved:
             # No new information discovered, no need for another iteration
+            logger.debug(f"[🔍 DEBUG]   ⏸ No new context discovered - stopping")
             break
 
         # If this is the last allowed iteration, stop
         if iteration >= max_iterations:
+            logger.debug(f"[🔍 DEBUG]   ⏸ Max iterations reached")
             break
 
     # === Select best result ===
@@ -133,6 +153,12 @@ def iterative_preprocess(
     best_result['improved'] = len(iterations_data) > 1  # True if we did multiple passes
     best_result['all_iterations'] = iterations_data
     best_result['processing_time_ms'] = round((time.time() - start_time) * 1000, 3)
+
+    logger.debug(f"\n[🔍 DEBUG]   📊 Summary:")
+    logger.debug(f"[🔍 DEBUG]      - Total iterations: {best_result['total_iterations']}")
+    logger.debug(f"[🔍 DEBUG]      - Final normalized: '{best_result['normalized']}'")
+    logger.debug(f"[🔍 DEBUG]      - Processing time: {best_result['processing_time_ms']:.3f}ms")
+    logger.debug("[🔍 DEBUG] " + "═" * 76 + "\n")
 
     return best_result
 

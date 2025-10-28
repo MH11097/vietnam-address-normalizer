@@ -17,10 +17,10 @@ if sys.platform == 'win32':
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 from src.processors.phase1_preprocessing import preprocess
-from src.processors.phase2_extraction import extract_components
-from src.processors.phase3_candidates import generate_candidates
-from src.processors.phase4_validation import validate_and_rank
-from src.processors.phase5_postprocessing import postprocess
+from src.processors.phase3_extraction import extract_components
+from src.processors.phase4_candidates import generate_candidates
+from src.processors.phase5_validation import validate_and_rank
+from src.processors.phase6_postprocessing import postprocess
 from src.utils.db_utils import query_all
 from src.utils.text_utils import normalize_hint
 from src.utils.iterative_preprocessing import iterative_preprocess, should_use_iterative
@@ -44,25 +44,35 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
-# Cấu hình logging - chỉ hiển thị WARNING và ERROR
-def setup_logging():
+# Cấu hình logging - chỉ hiển thị WARNING và ERROR (hoặc DEBUG nếu có flag)
+def setup_logging(debug=False):
     """
     Thiết lập logging gọn gàng
     - Ẩn tất cả INFO log từ modules con (phase1-5, utils)
-    - Chỉ hiển thị WARNING và ERROR
+    - Chỉ hiển thị WARNING và ERROR (hoặc DEBUG nếu debug=True)
     """
-    logger = logging.getLogger()
-    logger.setLevel(logging.WARNING)
+    # Configure root logger
+    root_logger = logging.getLogger()
+
+    if debug:
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        root_logger.setLevel(logging.WARNING)
 
     # Xóa handlers cũ nếu có
-    if logger.handlers:
-        logger.handlers.clear()
+    if root_logger.handlers:
+        root_logger.handlers.clear()
 
     handler = logging.StreamHandler()
-    handler.setFormatter(ColoredFormatter('%(levelname)s - %(message)s'))
-    logger.addHandler(handler)
+    if debug:
+        handler.setFormatter(logging.Formatter('%(message)s'))  # Simple format for debug
+        handler.setLevel(logging.DEBUG)
+    else:
+        handler.setFormatter(ColoredFormatter('%(levelname)s - %(message)s'))
+        handler.setLevel(logging.WARNING)
+    root_logger.addHandler(handler)
 
-# Gọi setup
+# Gọi setup (sẽ được gọi lại với debug flag trong main)
 setup_logging()
 
 
@@ -114,14 +124,16 @@ def score_color(score):
         return Colors.RED
 
 
-def load_samples(limit=3, offset=0):
+def load_samples(limit=3, offset=0, random=False):
     """Load sample addresses từ database"""
-    query = """
+    order_clause = "ORDER BY RANDOM()" if random else ""
+    query = f"""
     SELECT cif_no, dia_chi_thuong_tru,
            ten_tinh_thuong_tru, ten_quan_huyen_thuong_tru
     FROM raw_addresses
     WHERE dia_chi_thuong_tru IS NOT NULL
       AND dia_chi_thuong_tru != ''
+    {order_clause}
     LIMIT ? OFFSET ?
     """
     return query_all(query, (limit, offset))
@@ -139,7 +151,7 @@ def process_one_address(address_text, province_known=None, district_known=None):
     prov_colored = colorize(province_known or '____', Colors.CYAN)
     dist_colored = colorize(district_known or '____', Colors.CYAN)
 
-    print(f"📥 Địa chỉ: {address_colored}, Tỉnh={prov_colored}, Huyện={dist_colored}")
+    print(f"📥 Địa chỉ: {address_colored}, Huyện={dist_colored}, Tỉnh={prov_colored}")
 
     # ========== PHASE 1: Tiền xử lý (with ITERATIVE preprocessing) ==========
     # Use iterative preprocessing to fix abbreviation expansion circular dependency
@@ -166,9 +178,33 @@ def process_one_address(address_text, province_known=None, district_known=None):
 
     # ========== PHASE 2: Trích xuất (Extract Potentials) ==========
     p2 = extract_components(p1, province_known, district_known)
+    
     p2_time = p2['processing_time_ms']
-    print(f"\n⏱ {colorize(f'{p2_time:5.1f}ms', Colors.YELLOW)} | {colorize('Phase 2: Trích xuất (Extract Potentials)', Colors.BOLD)}")
-    print(f"  └─ N-gram matching với 9,991 xã/phường trong database")
+    print(f"\n⏱ {colorize(f'{p2_time:5.1f}ms', Colors.YELLOW)} | {colorize('Phase 2: Trích xuất Components', Colors.BOLD)}")
+
+    # Explain the algorithm
+    print(f"  └─ {colorize('Thuật toán:', Colors.BOLD)} Hierarchical Scoped Search (tìm kiếm phân cấp)")
+    print(f"     ├─ Bước 1: Tạo N-grams từ văn bản (1-gram → 4-gram)")
+    print(f"     ├─ Bước 2: Match với 9,991 xã/phường trong database")
+    print(f"     ├─ Bước 3: Tính điểm dựa trên: vị trí, độ dài, fuzzy similarity")
+    print(f"     └─ Bước 4: Lọc và xếp hạng theo confidence score")
+
+    # Show N-gram generation stats
+    normalized = p1.get('normalized', '')
+    tokens = normalized.split()
+    total_ngrams = sum(max(0, len(tokens) - n + 1) for n in range(1, min(5, len(tokens) + 1)))
+    print(f"\n  {colorize('N-gram Generation:', Colors.BOLD)}")
+    print(f"     ├─ Số tokens: {colorize(str(len(tokens)), Colors.CYAN)}")
+    print(f"     ├─ Tổng n-grams sinh ra: {colorize(str(total_ngrams), Colors.YELLOW)} (1-4 grams)")
+    print(f"     └─ {colorize(' '.join([f'[{t}]' for t in tokens]), Colors.GREEN)}")
+
+    # Show known values first (if provided)
+    if province_known or district_known:
+        print(f"\n  {colorize('Known Values (Trusted 100%):', Colors.BOLD)}")
+        if province_known:
+            print(f"     └─ Province: {colorize(province_known, Colors.CYAN_BOLD)} (từ dữ liệu gốc)")
+        if district_known:
+            print(f"     └─ District: {colorize(district_known, Colors.GREEN_BOLD)} (từ dữ liệu gốc)")
 
     # Show number of potentials extracted (NEW structure - no candidates yet)
     potential_provinces = p2.get('potential_provinces', [])
@@ -178,23 +214,180 @@ def process_one_address(address_text, province_known=None, district_known=None):
 
     total_potentials = len(potential_provinces) + len(potential_districts) + len(potential_wards) + len(potential_streets)
 
-    if total_potentials > 0:
-        print(f"  └─ Extracted {colorize(str(total_potentials), Colors.YELLOW)} potentials: "
-              f"{len(potential_provinces)} provinces, {len(potential_districts)} districts, "
-              f"{len(potential_wards)} wards, {len(potential_streets)} streets")
+    # Show detailed potentials for each level
+    print(f"\n  {colorize('Potentials Extracted:', Colors.BOLD)} (tổng {colorize(str(total_potentials), Colors.YELLOW)})")
 
-        # Show top 3 potentials for each level
-        if potential_provinces:
-            print(f"     └─ Top provinces: {', '.join([colorize(p[0], Colors.CYAN) for p in potential_provinces[:3]])}")
-        if potential_districts:
-            print(f"     └─ Top districts: {', '.join([colorize(d[0], Colors.GREEN) for d in potential_districts[:3]])}")
-        if potential_wards:
-            print(f"     └─ Top wards: {', '.join([colorize(w[0], Colors.GREEN_BOLD) for w in potential_wards[:3]])}")
+    if potential_provinces:
+        print(f"\n     {colorize('Provinces:', Colors.CYAN_BOLD)} ({len(potential_provinces)} found)")
+        for idx, (name, score, pos) in enumerate(potential_provinces[:5], 1):
+            # Explain score
+            score_pct = score * 100
+            pos_str = f"pos:{pos[0]}-{pos[1]}" if pos != (-1, -1) else "known"
+            score_colored = colorize(f"{score:.3f}", score_color(score_pct))
+            print(f"       {idx}. {colorize(name, Colors.CYAN)} | score:{score_colored} | {pos_str}")
+            # Add explanation for first one
+            if idx == 1:
+                if score >= 1.0:
+                    print(f"          └─ {colorize('Exact match hoặc known value', Colors.GREEN)}")
+                elif score >= 0.95:
+                    print(f"          └─ {colorize('Very high similarity (vị trí cuối văn bản)', Colors.GREEN)}")
+                else:
+                    print(f"          └─ {colorize(f'Fuzzy match {score_pct:.0f}%', Colors.YELLOW)}")
+
+    if potential_districts:
+        print(f"\n     {colorize('Districts:', Colors.GREEN_BOLD)} ({len(potential_districts)} found)")
+        for idx, (name, score, pos) in enumerate(potential_districts[:5], 1):
+            score_pct = score * 100
+            pos_str = f"pos:{pos[0]}-{pos[1]}" if pos != (-1, -1) else "known"
+            score_colored = colorize(f"{score:.3f}", score_color(score_pct))
+
+            # Check if from abbreviation
+            original_text = address_text.upper()
+            normalized_lower = p1.get('normalized', '').lower()
+            abbr_note = ""
+            if 'DHA' in original_text and name == 'dong ha':
+                abbr_note = f" {colorize('[DHA→dong ha]', Colors.YELLOW)}"
+            elif 'TX' in original_text and 'tan' in name:
+                abbr_note = f" {colorize('[TX expansion]', Colors.YELLOW)}"
+
+            print(f"       {idx}. {colorize(name, Colors.GREEN)} | score:{score_colored} | {pos_str}{abbr_note}")
+            if idx == 1:
+                if score >= 1.0:
+                    print(f"          └─ {colorize('Exact match từ pattern hoặc abbreviation', Colors.GREEN)}")
+                elif score >= 0.90:
+                    print(f"          └─ {colorize('High confidence (scoped to province)', Colors.GREEN)}")
+                else:
+                    print(f"          └─ {colorize(f'Fuzzy match trong phạm vi province', Colors.YELLOW)}")
+
+    if potential_wards:
+        print(f"\n     {colorize('Wards:', Colors.GREEN_BOLD)} ({len(potential_wards)} found)")
+        for idx, (name, score, pos) in enumerate(potential_wards[:5], 1):
+            score_pct = score * 100
+            pos_str = f"pos:{pos[0]}-{pos[1]}" if pos != (-1, -1) else "inferred"
+            score_colored = colorize(f"{score:.3f}", score_color(score_pct))
+
+            # Check if from pattern extraction
+            pattern_note = ""
+            normalized_lower = p1.get('normalized', '').lower()
+            if name.isdigit() and f'phuong {name}' in normalized_lower:
+                pattern_note = f" {colorize('[PHUONG pattern]', Colors.YELLOW)}"
+            elif name.isdigit() and f'p {name}' in normalized_lower:
+                pattern_note = f" {colorize('[P. pattern]', Colors.YELLOW)}"
+
+            print(f"       {idx}. {colorize(name, Colors.GREEN_BOLD)} | score:{score_colored} | {pos_str}{pattern_note}")
+            if idx == 1:
+                if score >= 1.0:
+                    print(f"          └─ {colorize('Exact match từ explicit pattern (PHUONG X, P.X)', Colors.GREEN)}")
+                elif score >= 0.95:
+                    print(f"          └─ {colorize('Very high match (scoped to district)', Colors.GREEN)}")
+                else:
+                    print(f"          └─ {colorize(f'Fuzzy match trong district/province', Colors.YELLOW)}")
+
+    if potential_streets:
+        print(f"\n     {colorize('Streets:', Colors.YELLOW)} ({len(potential_streets)} found - dùng để fallback)")
+        for idx, (name, score, pos) in enumerate(potential_streets[:3], 1):
+            score_colored = colorize(f"{score:.3f}", score_color(score * 100))
+            print(f"       {idx}. {name} | score:{score_colored}")
+
+    if total_potentials == 0:
+        if not province_known and not district_known:
+            print(f"     └─ {colorize('⚠ Không tìm thấy potentials nào', Colors.RED)}")
+        else:
+            print(f"     └─ Không trích xuất thêm từ văn bản (dùng known values)")
+
+    # Show hierarchical search path with detailed explanation
+    print(f"\n  {colorize('Search Path (Best Match):', Colors.BOLD)}")
+    print(f"     {colorize('Giải thích:', Colors.YELLOW)} Tìm kiếm phân cấp Province → District → Ward")
+    print(f"     {colorize('Mỗi level thu hẹp phạm vi tìm kiếm cho level tiếp theo', Colors.YELLOW)}")
+
+    # Step 1: Province
+    print(f"\n     {colorize('1. Province:', Colors.BOLD)}")
+    if province_known:
+        print(f"        └─ {colorize(province_known, Colors.CYAN_BOLD)} {colorize('[KNOWN]', Colors.GREEN)}")
+        print(f"           └─ Từ dữ liệu gốc (trusted 100%)")
+    elif potential_provinces:
+        p_name, p_score, p_pos = potential_provinces[0]
+        score_colored = colorize(f"[{p_score:.3f}]", score_color(p_score * 100))
+        print(f"        └─ {colorize(p_name, Colors.CYAN_BOLD)} {score_colored}")
+        if p_score >= 1.0:
+            print(f"           └─ Exact match ở cuối văn bản (vị trí điển hình)")
+        elif p_score >= 0.95:
+            print(f"           └─ Very high similarity (rightmost tokens)")
+        else:
+            print(f"           └─ Fuzzy match với confidence {p_score*100:.0f}%")
     else:
-        print(f"  └─ {colorize('No potentials found', Colors.RED)}")
+        print(f"        └─ {colorize('not found', Colors.RED)}")
+        print(f"           └─ Không tìm thấy province trong văn bản")
+
+    # Step 2: District
+    print(f"\n     {colorize('2. District:', Colors.BOLD)} {colorize('(scoped to province)', Colors.YELLOW)}")
+    if district_known:
+        print(f"        └─ {colorize(district_known, Colors.GREEN_BOLD)} {colorize('[KNOWN]', Colors.GREEN)}")
+        print(f"           └─ Từ dữ liệu gốc (trusted 100%)")
+    elif potential_districts:
+        d_name, d_score, d_pos = potential_districts[0]
+        score_colored = colorize(f"[{d_score:.3f}]", score_color(d_score * 100))
+
+        # Check if from abbreviation expansion
+        abbr_note = ""
+        abbr_explanation = ""
+        original_text = address_text.upper()
+        normalized_lower = p1.get('normalized', '').lower()
+
+
+        print(f"        └─ {colorize(d_name, Colors.GREEN_BOLD)} {score_colored}{abbr_note}")
+        if d_score >= 1.0:
+            print(f"           └─ Exact match hoặc từ abbreviation expansion")
+        elif d_score >= 0.90:
+            print(f"           └─ High confidence match trong scope của province")
+        else:
+            print(f"           └─ Fuzzy match {d_score*100:.0f}% trong districts của province")
+        if abbr_explanation:
+            print(abbr_explanation)
+    else:
+        print(f"        └─ {colorize('not found', Colors.RED)}")
+        print(f"           └─ Không tìm thấy district trong văn bản")
+
+    # Step 3: Ward
+    print(f"\n     {colorize('3. Ward:', Colors.BOLD)} {colorize('(scoped to district)', Colors.YELLOW)}")
+    if potential_wards:
+        w_name, w_score, w_pos = potential_wards[0]
+        score_colored = colorize(f"[{w_score:.3f}]", score_color(w_score * 100))
+
+        # Check if from pattern extraction
+        pattern_note = ""
+        pattern_explanation = ""
+        normalized_lower = p1.get('normalized', '').lower()
+        if w_name.isdigit() and f'phuong {w_name}' in normalized_lower:
+            pattern_note = colorize(f" [PHUONG {w_name}→{w_name}]", Colors.YELLOW)
+            pattern_explanation = f"\n           └─ Trích xuất từ pattern 'PHUONG {w_name}' (explicit pattern)"
+        elif w_name.isdigit() and f'p {w_name}' in normalized_lower:
+            pattern_note = colorize(f" [P.{w_name}→{w_name}]", Colors.YELLOW)
+            pattern_explanation = f"\n           └─ Trích xuất từ pattern 'P.{w_name}' (abbreviated pattern)"
+
+        print(f"        └─ {colorize(w_name, Colors.GREEN_BOLD)} {score_colored}{pattern_note}")
+        if w_score >= 1.0:
+            print(f"           └─ Exact match từ explicit pattern (PHUONG X, P.X, XA X)")
+        elif w_score >= 0.95:
+            print(f"           └─ Very high match trong wards của district")
+        else:
+            print(f"           └─ Fuzzy match {w_score*100:.0f}% trong scope của district")
+        if pattern_explanation:
+            print(pattern_explanation)
+    else:
+        print(f"        └─ {colorize('not found', Colors.RED)}")
+        print(f"           └─ Không tìm thấy ward (có thể chỉ có province+district)")
+
+    # Show scoring formula explanation
+    print(f"\n  {colorize('Score Calculation:', Colors.BOLD)}")
+    print(f"     ├─ {colorize('Fuzzy Similarity:', Colors.YELLOW)} So sánh chuỗi (ensemble_fuzzy_score)")
+    print(f"     ├─ {colorize('Position Bonus:', Colors.YELLOW)} Càng gần vị trí điển hình càng cao điểm")
+    print(f"     ├─ {colorize('Length Bonus:', Colors.YELLOW)} N-gram dài hơn (specific) → điểm cao hơn")
+    print(f"     └─ {colorize('Final Score:', Colors.YELLOW)} Weighted combination of above factors")
 
     # ========== PHASE 3: Generate Candidates (Multi-source enrichment) ==========
     p3 = generate_candidates(p2)
+    
     num_candidates = p3.get('total_candidates', 0)
     sources_used = p3.get('sources_used', [])
     local_count = p3.get('local_candidates_count', 0)
@@ -241,6 +434,7 @@ def process_one_address(address_text, province_known=None, district_known=None):
 
     # ========== PHASE 4: Validation & Ranking ==========
     p4 = validate_and_rank(p3)
+    
     best = p4.get('best_match')
     p4_time = p4['processing_time_ms']
     print(f"\n⏱ {colorize(f'{p4_time:5.1f}ms', Colors.YELLOW)} | {colorize('Phase 4: Validation & Ranking', Colors.BOLD)}")
@@ -300,6 +494,7 @@ def process_one_address(address_text, province_known=None, district_known=None):
         'original_address': address_text,
         'matched_components': p4.get('best_match', {})
     })
+    
     formatted_output = p5.get('formatted_output', {})
     p5_time = p5['processing_time_ms']
     print(f"\n⏱ {colorize(f'{p5_time:5.1f}ms', Colors.YELLOW)} | {colorize('Phase 5: Format kết quả cuối', Colors.BOLD)}")
@@ -371,30 +566,35 @@ def process_one_address(address_text, province_known=None, district_known=None):
             cand_district = candidate.get('district', '')
             cand_ward = candidate.get('ward', '')
 
-            # Calculate remaining for this candidate
-            from src.processors.phase5_postprocessing import extract_remaining_address
-            cand_remaining = extract_remaining_address(address_text, {
-                'province': cand_province,
-                'district': cand_district,
-                'ward': cand_ward
-            })
+            # Calculate remaining for this candidate using token positions
+            from src.processors.phase6_postprocessing import extract_remaining_address
+            normalized_tokens = candidate.get('normalized_tokens', [])
+            if normalized_tokens:
+                token_positions = {
+                    'province': candidate.get('province_tokens', (-1, -1)),
+                    'district': candidate.get('district_tokens', (-1, -1)),
+                    'ward': candidate.get('ward_tokens', (-1, -1))
+                }
+                cand_remaining = extract_remaining_address(normalized_tokens, token_positions)
+            else:
+                cand_remaining = ''
 
             # Format remaining (uppercase, no diacritics, truncate to 40 chars)
-            from src.processors.phase5_postprocessing import remove_diacritics_and_uppercase
+            from src.processors.phase6_postprocessing import remove_diacritics_and_uppercase
             cand_remaining_formatted = remove_diacritics_and_uppercase(cand_remaining)[:40] if cand_remaining else '____'
 
             # Get full names with diacritics (ALREADY populated by Phase 3)
             # No DB lookups needed - use pre-populated values
-            from src.processors.phase5_postprocessing import _extract_name_from_full
+            from src.processors.phase6_postprocessing import _capitalize_full_name
 
             province_full = candidate.get('province_full', '')
             district_full = candidate.get('district_full', '')
             ward_full = candidate.get('ward_full', '')
 
-            # Extract names without administrative prefixes
-            province_display = _extract_name_from_full(province_full) if province_full else (cand_province.capitalize() if cand_province else '____')
-            district_display = _extract_name_from_full(district_full) if district_full else (cand_district.capitalize() if cand_district else '____')
-            ward_display = _extract_name_from_full(ward_full) if ward_full else (cand_ward.capitalize() if cand_ward else '____')
+            # Capitalize full names with administrative prefixes
+            province_display = _capitalize_full_name(province_full) if province_full else (cand_province.capitalize() if cand_province else '____')
+            district_display = _capitalize_full_name(district_full) if district_full else (cand_district.capitalize() if cand_district else '____')
+            ward_display = _capitalize_full_name(ward_full) if ward_full else (cand_ward.capitalize() if cand_ward else '____')
 
             # Get source and add color label
             source = candidate.get('source', 'unknown')
@@ -430,6 +630,304 @@ def process_one_address(address_text, province_known=None, district_known=None):
     return {'phase1': p1, 'phase2': p2, 'phase3': p3, 'phase4': p4, 'phase5': p5}
 
 
+def normalize_ground_truth(value):
+    """
+    Normalize ground truth value from database.
+
+    Handles special cases:
+    - "/" → None (unknown/missing in DB)
+    - "" → None (empty)
+    - Valid string → normalized (using normalize_hint)
+
+    Args:
+        value: Raw value from database
+
+    Returns:
+        Normalized string or None
+
+    Example:
+        >>> normalize_ground_truth("/")
+        None
+        >>> normalize_ground_truth("HA NOI")
+        "ha noi"
+    """
+    if not value or value == '/':
+        return None
+    return normalize_hint(value)
+
+
+def batch_test_with_accuracy(limit=100, offset=0, random_sample=True, test_mode='assisted'):
+    """
+    Batch test with accuracy metrics.
+
+    Tests N addresses and compares results with ground truth (province/district hints).
+
+    Args:
+        limit: Number of addresses to test (default: 100)
+        offset: Starting offset in database (default: 0)
+        random_sample: Whether to use random sampling (default: True)
+        test_mode: 'blind' (no hints) or 'assisted' (with hints like production)
+
+    Returns:
+        dict with accuracy metrics
+    """
+    print(f"\n{'='*80}")
+    print(colorize(f"🧪 BATCH ACCURACY TEST - {limit} Addresses", Colors.CYAN_BOLD))
+    print(f"{'='*80}\n")
+
+    # Load samples from database
+    samples = load_samples(limit, offset, random_sample)
+
+    if not samples:
+        print(colorize("❌ No samples found!", Colors.RED))
+        return None
+
+    print(f"✅ Loaded {len(samples)} records\n")
+    print(f"Test Mode: {colorize(test_mode.upper(), Colors.CYAN_BOLD)}")
+    print("Processing...\n")
+
+    # Metrics
+    correct_province = 0
+    correct_district = 0
+    correct_full = 0  # Both province and district correct
+    total_confidence = 0.0
+    total_proximity = 0.0
+    total_processing_time = 0.0
+
+    # Ground truth availability counters
+    province_gt_count = 0
+    district_gt_count = 0
+
+    results = []
+
+    for i, sample in enumerate(samples, 1):
+        raw_address = sample['dia_chi_thuong_tru']
+
+        # Normalize ground truth (/ → None)
+        ground_truth_province = normalize_ground_truth(sample.get('ten_tinh_thuong_tru'))
+        ground_truth_district = normalize_ground_truth(sample.get('ten_quan_huyen_thuong_tru'))
+
+        # Count ground truth availability
+        if ground_truth_province:
+            province_gt_count += 1
+        if ground_truth_district:
+            district_gt_count += 1
+
+        # Process address based on test mode
+        if test_mode == 'blind':
+            # Blind extraction (no hints - pure extraction test)
+            p1 = preprocess(raw_address, province_known=None)
+            p2 = extract_components(p1, province_known=None, district_known=None)
+        else:  # assisted
+            # Assisted extraction (with hints - production mode)
+            p1 = preprocess(raw_address, province_known=ground_truth_province)
+            p2 = extract_components(p1, province_known=ground_truth_province, district_known=ground_truth_district)
+
+        p3 = generate_candidates(p2)
+        p4 = validate_and_rank(p3)
+
+        best = p4.get('best_match') if p4 else None
+        extracted_province = best.get('province', '') if best else ''
+        extracted_district = best.get('district', '') if best else ''
+        extracted_ward = best.get('ward', '') if best else ''
+        confidence = best.get('confidence', 0.0) if best else 0.0
+        proximity_score = best.get('proximity_score', 0.0) if best else 0.0
+        processing_time = (
+            p1.get('processing_time_ms', 0) +
+            p2.get('processing_time_ms', 0) +
+            p3.get('processing_time_ms', 0) +
+            p4.get('processing_time_ms', 0)
+        )
+
+        # Compare with ground truth (only if ground truth exists!)
+        province_match = None
+        if ground_truth_province:
+            province_match = (extracted_province == ground_truth_province)
+            if province_match:
+                correct_province += 1
+
+        district_match = None
+        if ground_truth_district:
+            district_match = (extracted_district == ground_truth_district)
+            if district_match:
+                correct_district += 1
+
+        # Full match: both correct (only count if both GT available)
+        if ground_truth_province and ground_truth_district:
+            if province_match and district_match:
+                correct_full += 1
+
+        total_confidence += confidence
+        total_proximity += proximity_score
+        total_processing_time += processing_time
+
+        results.append({
+            'address': raw_address[:60] + '...' if len(raw_address) > 60 else raw_address,
+            'province_match': province_match,
+            'district_match': district_match,
+            'confidence': confidence,
+            'proximity': proximity_score
+        })
+
+        # Progress indicator
+        if i % 10 == 0:
+            print(f"  Processed {i}/{len(samples)}...")
+
+    # Calculate metrics (based on available ground truth!)
+    total = len(samples)
+    province_accuracy = (correct_province / province_gt_count * 100) if province_gt_count > 0 else 0
+    district_accuracy = (correct_district / district_gt_count * 100) if district_gt_count > 0 else 0
+
+    # Full accuracy: count records with both GT available
+    full_gt_count = sum(1 for s in samples
+                       if normalize_ground_truth(s.get('ten_tinh_thuong_tru'))
+                       and normalize_ground_truth(s.get('ten_quan_huyen_thuong_tru')))
+    full_accuracy = (correct_full / full_gt_count * 100) if full_gt_count > 0 else 0
+
+    avg_confidence = total_confidence / total if total > 0 else 0
+    avg_proximity = total_proximity / total if total > 0 else 0
+    avg_time = total_processing_time / total if total > 0 else 0
+
+    # Print results
+    print(f"\n{'='*80}")
+    print(colorize("📊 GROUND TRUTH QUALITY", Colors.CYAN_BOLD))
+    print(f"{'='*80}\n")
+
+    print(f"Total Samples:           {total}")
+    print(f"Province GT Available:   {province_gt_count}/{total} ({province_gt_count/total*100:.1f}%)")
+    print(f"District GT Available:   {district_gt_count}/{total} ({district_gt_count/total*100:.1f}%)")
+    print(f"Both GT Available:       {full_gt_count}/{total} ({full_gt_count/total*100:.1f}%)")
+    print(f"Test Mode:               {colorize(test_mode.upper(), Colors.CYAN_BOLD)}")
+
+    print(f"\n{'='*80}")
+    print(colorize("📊 ACCURACY METRICS", Colors.GREEN_BOLD))
+    print(f"{'='*80}\n")
+
+    print(f"Province Accuracy:   {colorize(f'{province_accuracy:.1f}%', Colors.GREEN if province_accuracy >= 90 else Colors.YELLOW)} ({correct_province}/{province_gt_count})")
+    print(f"District Accuracy:   {colorize(f'{district_accuracy:.1f}%', Colors.GREEN if district_accuracy >= 80 else Colors.YELLOW)} ({correct_district}/{district_gt_count})")
+    print(f"Full Match Accuracy: {colorize(f'{full_accuracy:.1f}%', Colors.GREEN if full_accuracy >= 75 else Colors.YELLOW)} ({correct_full}/{full_gt_count})")
+    print()
+    print(f"Avg Confidence Score:  {avg_confidence:.3f}")
+    print(f"Avg Proximity Score:   {avg_proximity:.3f}")
+    print(f"Avg Processing Time:   {avg_time:.1f} ms/address")
+    print(f"\n{'='*80}\n")
+
+    # Show some failed cases
+    failed = [r for r in results if r['province_match'] == False or r['district_match'] == False]
+    if failed and len(failed) <= 10:
+        print(colorize("❌ Failed Cases:", Colors.YELLOW_BOLD))
+        for r in failed[:10]:
+            prov_icon = "✓" if r['province_match'] else "✗"
+            dist_icon = "✓" if r['district_match'] else "✗"
+            print(f"  {prov_icon}{dist_icon} {r['address']}")
+        print()
+
+    return {
+        'province_accuracy': province_accuracy,
+        'district_accuracy': district_accuracy,
+        'full_accuracy': full_accuracy,
+        'avg_confidence': avg_confidence,
+        'avg_proximity': avg_proximity,
+        'avg_processing_time': avg_time
+    }
+
+
+def debug_failed_extractions(limit=100, show_first=10):
+    """
+    Debug failed province extractions in BLIND mode.
+    Shows detailed trace for first N failed cases.
+    """
+    from src.utils.db_utils import get_province_set
+
+    print(f"\n{'='*80}")
+    print(colorize("🔍 DEBUG: Failed Province Extractions (BLIND Mode)", Colors.CYAN_BOLD))
+    print(f"{'='*80}\n")
+
+    samples = load_samples(limit, random_sample=True)
+    failed_cases = []
+
+    for sample in samples:
+        raw = sample['dia_chi_thuong_tru']
+        gt_province = normalize_ground_truth(sample.get('ten_tinh_thuong_tru'))
+
+        if not gt_province:
+            continue
+
+        # BLIND extraction
+        p1 = preprocess(raw, province_known=None)
+        p2 = extract_components(p1, province_known=None, district_known=None)
+        p3 = generate_candidates(p2)
+        p4 = validate_and_rank(p3)
+
+        best = p4.get('best_match') if p4 else None
+        extracted = best.get('province') if best else None
+
+        # Failed?
+        if extracted != gt_province:
+            failed_cases.append({
+                'raw': raw,
+                'normalized': p1.get('normalized'),
+                'gt_province': gt_province,
+                'extracted_province': extracted,
+                'candidates': p3.get('candidates', []),
+                'potentials': p2.get('potential_provinces', [])
+            })
+
+    print(f"Total Failed: {len(failed_cases)}/{len([s for s in samples if normalize_ground_truth(s.get('ten_tinh_thuong_tru'))])}\n")
+
+    # Show first N cases
+    province_set = get_province_set()
+
+    for i, case in enumerate(failed_cases[:show_first], 1):
+        print(f"\n{colorize(f'--- CASE #{i} ---', Colors.YELLOW_BOLD)}")
+        print(f"Raw:        {case['raw'][:70]}...")
+        print(f"Normalized: {case['normalized'][:70]}...")
+        print(f"GT:         {colorize(case['gt_province'], Colors.GREEN)}")
+        print(f"Extracted:  {colorize(case['extracted_province'] or 'None', Colors.RED)}")
+
+        # Check if GT in normalized text
+        gt_in_text = case['gt_province'] in case['normalized']
+        print(f"GT in text: {colorize('✓ YES', Colors.GREEN) if gt_in_text else colorize('✗ NO (incomplete)', Colors.RED)}")
+
+        # Check if GT in province set
+        gt_in_set = case['gt_province'] in province_set
+        print(f"GT in DB:   {colorize('✓ YES', Colors.GREEN) if gt_in_set else colorize('✗ NO (format mismatch)', Colors.RED)}")
+
+        # Potentials found
+        print(f"\nPotentials Found ({len(case['potentials'])}):")
+        if case['potentials']:
+            for name, score, pos in case['potentials'][:3]:
+                print(f"  - {name:20s} score: {score:.3f} pos: {pos}")
+        else:
+            print(f"  {colorize('(none)', Colors.RED)}")
+
+        # Candidates
+        print(f"\nCandidates ({len(case['candidates'])}):")
+        if case['candidates']:
+            for j, cand in enumerate(case['candidates'][:2], 1):
+                print(f"  {j}. {cand.get('province', 'None'):20s} score: {cand.get('combined_score', 0):.3f}")
+        else:
+            print(f"  {colorize('(none)', Colors.RED)}")
+
+    # Categorize
+    print(f"\n{'='*80}")
+    print(colorize("📊 FAILURE CATEGORIES", Colors.CYAN_BOLD))
+    print(f"{'='*80}\n")
+
+    not_in_text = sum(1 for c in failed_cases if c['gt_province'] not in c['normalized'])
+    not_in_set = sum(1 for c in failed_cases if c['gt_province'] not in province_set)
+    no_potentials = sum(1 for c in failed_cases if not c['potentials'])
+    wrong_extracted = sum(1 for c in failed_cases if c['extracted_province'] and c['extracted_province'] != c['gt_province'])
+
+    total_failed = len(failed_cases)
+    print(f"Province not in text:      {not_in_text:3d} ({not_in_text/total_failed*100:.1f}%)")
+    print(f"GT not in province set:    {not_in_set:3d} ({not_in_set/total_failed*100:.1f}%)")
+    print(f"No potentials found:       {no_potentials:3d} ({no_potentials/total_failed*100:.1f}%)")
+    print(f"Wrong province extracted:  {wrong_extracted:3d} ({wrong_extracted/total_failed*100:.1f}%)")
+
+    print(f"\n{'='*80}\n")
+
+
 def main():
     """Hàm chính"""
     parser = argparse.ArgumentParser(description='Demo xử lý địa chỉ')
@@ -438,8 +936,41 @@ def main():
     parser.add_argument('-d', '--district', type=str, help='Gợi ý huyện')
     parser.add_argument('-l', '--limit', type=int, default=3, help='Số mẫu từ DB (mặc định: 3)')
     parser.add_argument('-o', '--offset', type=int, default=0, help='Vị trí bắt đầu (mặc định: 0)')
+    parser.add_argument('-r', '--random', action='store_true', help='Lấy mẫu ngẫu nhiên từ DB')
+    parser.add_argument('--auto', action='store_true', help='Tự động chạy hết không cần nhấn Enter')
+    parser.add_argument('--test-accuracy', action='store_true', help='Chạy batch test với tính accuracy metrics')
+    parser.add_argument('--test-mode',
+                       choices=['blind', 'assisted'],
+                       default='assisted',
+                       help='Test mode: blind (no hints) or assisted (with hints like production)')
+    parser.add_argument('--debug', action='store_true',
+                       help='Enable DEBUG logging (detailed trace of all phases)')
+    parser.add_argument('--debug-failed', action='store_true',
+                       help='Debug failed extractions (show detailed trace)')
 
     args = parser.parse_args()
+
+    # Enable debug logging if --debug flag
+    if args.debug:
+        setup_logging(debug=True)
+        # Enable detailed logging flags
+        from src import config
+        config.DEBUG_SQL = True
+        config.DEBUG_FUZZY = True
+        config.DEBUG_NGRAMS = True
+        config.DEBUG_EXTRACTION = True
+        print(f"{colorize('🐛 DEBUG MODE ENABLED', Colors.YELLOW_BOLD)} - Detailed logging for all phases")
+        print(f"  └─ SQL={Colors.GREEN}✓{Colors.RESET} | FUZZY={Colors.GREEN}✓{Colors.RESET} | NGRAMS={Colors.GREEN}✓{Colors.RESET} | EXTRACTION={Colors.GREEN}✓{Colors.RESET}\n")
+
+    # CHẾ ĐỘ 0.5: Debug failed extractions mode
+    if args.debug_failed:
+        debug_failed_extractions(limit=args.limit, show_first=10)
+        return
+
+    # CHẾ ĐỘ 0: Batch accuracy test
+    if args.test_accuracy:
+        batch_test_with_accuracy(args.limit, args.offset, args.random, args.test_mode)
+        return
 
     # CHẾ ĐỘ 1: Xử lý 1 địa chỉ
     if args.address:
@@ -455,7 +986,7 @@ def main():
         print(colorize(f"CHẾ ĐỘ: Xử lý batch từ database", Colors.CYAN_BOLD))
         print(f"{'='*60}")
 
-        samples = load_samples(args.limit, args.offset)
+        samples = load_samples(args.limit, args.offset, args.random)
 
         if not samples:
             print(colorize("❌ Không tìm thấy mẫu nào!", Colors.RED))
@@ -473,7 +1004,7 @@ def main():
                 sample.get('ten_quan_huyen_thuong_tru')
             )
 
-            if i < len(samples):
+            if i < len(samples) and not args.auto:
                 input(f"\n{colorize('▶ Nhấn Enter để tiếp tục...', Colors.YELLOW)}")
 
         print(f"\n{colorize('✅ Đã xử lý xong tất cả mẫu!', Colors.GREEN_BOLD)}\n")

@@ -17,11 +17,11 @@ HELPER_FILE = DATA_DIR / 'merge_file3.csv'
 HELPER_MANUAL_FILE = DATA_DIR / 'merged_file_manual3.csv'
 ABBREVIATIONS_FILE = DATA_DIR / 'tenVietTat.csv'
 
-# Fuzzy matching thresholds
+# Fuzzy matching thresholds (Very strict - 95%+ for all levels)
 FUZZY_THRESHOLDS = {
-    'province': 90,
-    'district': 85,
-    'ward': 80
+    'province': 95,
+    'district': 95,
+    'ward': 95
 }
 
 # Confidence thresholds for quality flags
@@ -62,6 +62,9 @@ MATCH_TYPE_WEIGHTS = {
 GEOGRAPHIC_CONTEXT_BONUS = 1.1  # 10% bonus for matches within hint scope
 HIERARCHY_INVALID_PENALTY = 0.8  # 20% penalty for invalid hierarchy
 
+# Position-based scoring settings
+POSITION_PENALTY_FACTOR = 0.2  # 20% max penalty for tokens far from end (0.8x-1.0x)
+
 # Ensemble scoring weights
 ENSEMBLE_WEIGHTS = {
     'token_sort': 0.5,
@@ -75,3 +78,16 @@ SCORING_WEIGHTS = {
     'at_rule': 0.3,     # 30%
     'string_similarity': 0.2  # 20%
 }
+
+# Debug logging flags (can be toggled independently)
+# Format: True/False or 'OFF'/'SUMMARY'/'FULL'/'WINNERS'/'TOP3'
+DEBUG_SQL = True        # Log SQL queries, params, and row counts
+DEBUG_FUZZY = 'WINNERS' # Fuzzy matching: OFF | WINNERS (only log best match) | TOP3 | FULL (all comparisons)
+DEBUG_NGRAMS = False    # Log n-gram generation and testing
+DEBUG_EXTRACTION = True # Log extraction flow details
+
+# Fuzzy logging modes explained:
+# - 'OFF' or False: No fuzzy logs
+# - 'WINNERS': Only log the winning match (best score) - RECOMMENDED for debugging
+# - 'TOP3': Log top 3 candidates by score
+# - 'FULL' or True: Log every single comparison (200+ lines) - Use sparingly!

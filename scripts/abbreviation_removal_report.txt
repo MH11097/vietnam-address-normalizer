@@ -1,0 +1,1514 @@
+================================================================================
+ABBREVIATION REMOVAL REPORT
+================================================================================
+
+Logic: Remove abbreviations that appear as actual words in place names
+
+SUMMARY: 174 abbreviations to remove
+
+================================================================================
+WARD LEVEL: 134 problematic abbreviations
+================================================================================
+
+Abbreviation: "nt"
+  ✓ Is a real token (appears in 106 place names)
+  ✓ Collision count: 106 different full names
+  Full names:
+    - na tam
+    - na tau
+    - na tong
+    - nam tam
+    - nam tan
+    - nam tha
+    - nam thai
+    - nam thang
+    - nam thanh
+    - nam thinh
+    ... and 96 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ta"
+  ✓ Is a real token (appears in 24 place names)
+  ✓ Collision count: 24 different full names
+  Full names:
+    - tam an
+    - tam anh
+    - tan an
+    - tay an
+    - thai an
+    - thanh an
+    - thien an
+    - tho an
+    - thoi an
+    - thuan an
+    ... and 14 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ha"
+  ✓ Is a real token (appears in 17 place names)
+  ✓ Collision count: 17 different full names
+  Full names:
+    - ha an
+    - hai an
+    - hai anh
+    - hiep an
+    - hoa an
+    - hoang an
+    - hoang anh
+    - hoi an
+    - hong an
+    - hung an
+    ... and 7 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "al"
+  ✓ Is a real token (appears in 14 place names)
+  ✓ Collision count: 14 different full names
+  Full names:
+    - a lu
+    - a luoi
+    - an lac
+    - an lam
+    - an lao
+    - an lap
+    - an le
+    - an linh
+    - an loc
+    - an long
+    ... and 4 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "an"
+  ✓ Is a real token (appears in 14 place names)
+  ✓ Collision count: 14 different full names
+  Full names:
+    - a ngo
+    - a nong
+    - ai nghia
+    - an ngai
+    - an nghia
+    - an nghiep
+    - an nhan
+    - an nhon
+    - an nhut
+    - an ninh
+    ... and 4 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "la"
+  ✓ Is a real token (appears in 14 place names)
+  ✓ Collision count: 14 different full names
+  Full names:
+    - lac an
+    - laee
+    - lam
+    - lang
+    - lat
+    - lien am
+    - loc an
+    - loi an
+    - long an
+    - long anh
+    ... and 4 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "da"
+  ✓ Is a real token (appears in 14 place names)
+  ✓ Collision count: 14 different full names
+  Full names:
+    - dai an
+    - dai ang
+    - dak ang
+    - dan an
+    - dang
+    - de ar
+    - di an
+    - dien an
+    - dinh an
+    - dong a
+    ... and 4 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ty"
+  ✓ Is a real token (appears in 13 place names)
+  ✓ Collision count: 13 different full names
+  Full names:
+    - tan yen
+    - tay yen
+    - thach yen
+    - thai yen
+    - thanh yen
+    - thuan yen
+    - tien yen
+    - tran yen
+    - tri yen
+    - trung y
+    ... and 3 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ba"
+  ✓ Is a real token (appears in 13 place names)
+  ✓ Collision count: 13 different full names
+  Full names:
+    - ba
+    - bac ai
+    - bac an
+    - bang an
+    - bao ai
+    - bao an
+    - binh an
+    - bong am
+    - quan ba
+    - quan ban
+    ... and 3 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "et"
+  ✓ Is a real token (appears in 13 place names)
+  ✓ Collision count: 13 different full names
+  Full names:
+    - e tong
+    - ea t'ling
+    - ea tam
+    - ea tan
+    - ea tar
+    - ea tieu
+    - ea tih
+    - ea tir
+    - ea toh
+    - ea trang
+    ... and 3 more
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "na"
+  ✓ Is a real token (appears in 10 place names)
+  ✓ Collision count: 10 different full names
+  Full names:
+    - nam anh
+    - nga an
+    - nghi an
+    - nghia an
+    - ngoi a
+    - nguyet an
+    - nhon ai
+    - nhon an
+    - ninh an
+    - phuong nam
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "dy"
+  ✓ Is a real token (appears in 10 place names)
+  ✓ Collision count: 10 different full names
+  Full names:
+    - dai yen
+    - dak ya
+    - dien yen
+    - dinh yen
+    - dle yang
+    - dlie ya
+    - dlie yang
+    - dong y
+    - dong yen
+    - duc yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ca"
+  ✓ Is a real token (appears in 10 place names)
+  ✓ Collision count: 10 different full names
+  Full names:
+    - cam an
+    - cao an
+    - chanh an
+    - chieng an
+    - chu a
+    - co am
+    - cu an
+    - cuu an
+    - phuong cach
+    - phuong canh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tu"
+  ✓ Is a real token (appears in 8 place names)
+  ✓ Collision count: 8 different full names
+  Full names:
+    - huyen tung
+    - phuong tu
+    - tan uoc
+    - tan uyen
+    - than uyen
+    - thanh uyen
+    - tinh tuc
+    - tu
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ma"
+  ✓ Is a real token (appears in 8 place names)
+  ✓ Collision count: 8 different full names
+  Full names:
+    - mau a
+    - minh an
+    - mong an
+    - muong ai
+    - muong ang
+    - my an
+    - phuong mai
+    - phuong mao
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ka"
+  ✓ Is a real token (appears in 7 place names)
+  ✓ Collision count: 7 different full names
+  Full names:
+    - ke an
+    - khanh an
+    - kien an
+    - kim an
+    - kim anh
+    - krong a
+    - ky anh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "va"
+  ✓ Is a real token (appears in 6 place names)
+  ✓ Collision count: 6 different full names
+  Full names:
+    - van am
+    - van an
+    - ve an
+    - vien an
+    - vinh an
+    - vu an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "du"
+  ✓ Is a real token (appears in 6 place names)
+  ✓ Collision count: 6 different full names
+  Full names:
+    - dak ui
+    - du
+    - dun
+    - dung
+    - phuong duc
+    - xa dung
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ap"
+  ✓ Is a real token (appears in 6 place names)
+  ✓ Collision count: 6 different full names
+  Full names:
+    - an phong
+    - an phu
+    - an phuc
+    - an phuoc
+    - an phuong
+    - ayun pa
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "li"
+  ✓ Is a real token (appears in 6 place names)
+  ✓ Collision count: 6 different full names
+  Full names:
+    - lia
+    - lim
+    - phuong lien
+    - phuong liet
+    - phuong lieu
+    - phuong linh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "do"
+  ✓ Is a real token (appears in 6 place names)
+  ✓ Collision count: 6 different full names
+  Full names:
+    - da oai
+    - dak o
+    - dong
+    - phuong do
+    - phuong dong
+    - tinh dong
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "it"
+  ✓ Is a real token (appears in 6 place names)
+  ✓ Collision count: 6 different full names
+  Full names:
+    - ia tiem
+    - ia to
+    - ia toi
+    - ia tor
+    - ia trok
+    - ia tul
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "pa"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - pho an
+    - phong an
+    - phu an
+    - phuc an
+    - phuoc an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tha"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - phuong thanh
+    - quan thanh
+    - tan hiep a
+    - thang
+    - thanh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ho"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - ho
+    - huyen hoi
+    - quan hoa
+    - tinh hoa
+    - xa ho
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ky"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - keo yen
+    - khanh yen
+    - kong yang
+    - phuong ky
+    - tinh ky
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "hy"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - ha yen
+    - hai yang
+    - hai yen
+    - hoang yen
+    - hung yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "co"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - chau o
+    - chieng on
+    - con
+    - cua ong
+    - phuong cong
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "en"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - ea na
+    - ea nam
+    - ea ngai
+    - ea ning
+    - ea nuol
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "so"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - huyen son
+    - phuong son
+    - quan son
+    - tinh son
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "to"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - quan toan
+    - thiet ong
+    - tra on
+    - xa tong
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "bi"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - phuong binh
+    - quan binh
+    - tinh bien
+    - tinh binh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ga"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - gao
+    - gia an
+    - giao an
+    - gio an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "xa"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - phuong xa
+    - xuan ai
+    - xuan an
+    - xuan ang
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "sa"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - phuong sai
+    - son a
+    - son an
+    - song an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "nu"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - na u
+    - nguyen uy
+    - nong u
+    - nua
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "vy"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - van yen
+    - viet yen
+    - vinh yen
+    - vu yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ar"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - a roang
+    - a rooi
+    - a rooih
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ly"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - lai yen
+    - lang yen
+    - loc yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "di"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - dong ich
+    - phuong dien
+    - phuong dinh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "vo"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - vinh o
+    - voi
+    - vu oai
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ne"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - nam et
+    - nenh
+    - neo
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "vi"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - phuong vi
+    - phuong vien
+    - vii
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "thi"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - phuong thien
+    - phuong thinh
+    - tinh thien
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "pu"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - pa u
+    - phu ung
+    - phuc ung
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "hu"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - huc
+    - phuong hung
+    - tinh huc
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "cha"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - chau hung a
+    - chaval
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tat"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - tan an tay
+    - tan an thanh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "iv"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - ia ve
+    - iv
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "xy"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - xuan yen
+    - xy
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "my"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - my yen
+    - phuong my
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "me"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - me
+    - muong e
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "gi"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - phuong giao
+    - tinh gia
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "dac"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - dacpree
+    - dacpring
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "si"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - sia
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "am"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - an my
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tru"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phuong trung
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "phu"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phung
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "bu"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - buoi
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "1"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 1
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "10"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 10
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "12"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 12
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "13"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 13
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "14"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 14
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "15"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 15
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "2"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 2
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "4"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 4
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "6"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 6
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "8"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 8
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "9"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 9
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "11"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 11
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "16"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 16
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "3"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 3
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "5"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 5
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "7"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 7
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "18"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 18
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ro"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - rach ong
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "17"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 17
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "19"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 19
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "22"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 22
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "25"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 25
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "26"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 26
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "27"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 27
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "28"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 28
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "pla"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phuoc long a
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "lat"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - luong an tra
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "nan"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - nguyen an ninh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "lu"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - lai uyen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ke"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - kep
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "cat"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - chu a thai
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ia"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - ia ake
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tra"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - trang
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "bo"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - bo
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "phi"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - xa phien
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "i"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - i
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ii"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - iii
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "v"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - v
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "can"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - cam an nam
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ni"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - ninh ich
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "pe"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - po e
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "dro"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - dak ro ong
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ko"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - khoen on
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "go"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - goi
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ea"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - ealy
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tan"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - tam anh nam
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "gia"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - tinh giang
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "mi"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - tinh minh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "pho"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - tinh phong
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "lo"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - tinh long
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "thu"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - thuan
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "mo"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - mo o
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "no"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - na ot
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tri"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - quan trieu
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "kho"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phuong khoan
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "cam"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - cu a mung
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "eo"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - ea o
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "05"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 05
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "06"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 06
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "07"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 07
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "08"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 08
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "01"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 01
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "02"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 02
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "04"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 04
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "09"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 09
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "03"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 03
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "21"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 21
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "24"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 24
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "pah"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phu an hoa
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "chi"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phuong chieu
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "hoa"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phuong hoang
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "pha"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - phu huu a
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "20"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 20
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "don"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - dongvien
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "bha"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - bhalle
+  → ACTION: REMOVE (set to NULL in database)
+
+================================================================================
+DISTRICT LEVEL: 35 problematic abbreviations
+================================================================================
+
+Abbreviation: "nt"
+  ✓ Is a real token (appears in 5 place names)
+  ✓ Collision count: 5 different full names
+  Full names:
+    - nam truc
+    - nha trang
+    - nhon trach
+    - nhu thanh
+    - nui thanh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ha"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - hai an
+    - hoa an
+    - hoai an
+    - hoi an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ta"
+  ✓ Is a real token (appears in 4 place names)
+  ✓ Collision count: 4 different full names
+  Full names:
+    - tan an
+    - thach an
+    - thuan an
+    - tuy an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ty"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - tan yen
+    - tien yen
+    - tran yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "vy"
+  ✓ Is a real token (appears in 3 place names)
+  ✓ Collision count: 3 different full names
+  Full names:
+    - thi xa viet yen
+    - van yen
+    - vinh yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "al"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - a luoi
+    - an lao
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "to"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - thanh oai
+    - tra on
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "da"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - di an
+    - dong anh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ka"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - kien an
+    - ky anh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ap"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - an phu
+    - ayun pa
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "tu"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - tan uyen
+    - than uyen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ba"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - bac ai
+    - quan ba
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "hy"
+  ✓ Is a real token (appears in 2 place names)
+  ✓ Collision count: 2 different full names
+  Full names:
+    - ham yen
+    - hung yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "1"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 1
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "10"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 10
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "11"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 11
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "12"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 12
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "3"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 3
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "4"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 4
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "5"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 5
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "6"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 6
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "7"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 7
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "8"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 8
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "bi"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - tinh bien
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "an"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - an nhon
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "my"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - mang yang
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "am"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - an minh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "vi"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - vinh
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ho"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - quan hoa
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "so"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - quan son
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ly"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - luc yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "ma"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - muong ang
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "kan"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - krong a na
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "la"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - lak
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "9"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - 9
+  → ACTION: REMOVE (set to NULL in database)
+
+================================================================================
+PROVINCE LEVEL: 5 problematic abbreviations
+================================================================================
+
+Abbreviation: "hu"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - hue
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "hy"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - hung yen
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "la"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - long an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "na"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - nghe an
+  → ACTION: REMOVE (set to NULL in database)
+
+Abbreviation: "nt"
+  ✓ Is a real token (appears in 1 place names)
+  ✓ Collision count: 1 different full names
+  Full names:
+    - ninh thuan
+  → ACTION: REMOVE (set to NULL in database)

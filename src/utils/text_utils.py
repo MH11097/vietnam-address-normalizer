@@ -128,7 +128,11 @@ def _load_db_abbreviations(province_context: str = None) -> Dict[str, str]:
 def expand_abbreviations(text: str, use_db: bool = True, province_context: str = None) -> str:
     """
     Expand common Vietnamese address abbreviations.
-    Uses both hardcoded patterns and database abbreviations.
+
+    Priority order:
+    1. Hardcoded patterns (P., Q., TP.)
+    2. admin_divisions abbreviations (with province_context for disambiguation)
+    3. abbreviations table (common terms: HCM, HN, SG)
 
     Args:
         text: Input text with abbreviations
@@ -141,10 +145,10 @@ def expand_abbreviations(text: str, use_db: bool = True, province_context: str =
     Example:
         >>> expand_abbreviations("P. 1, Q. 2, TP. HCM")
         'phuong 1, quan 2, thanh pho ho chi minh'
-        >>> expand_abbreviations("HBT")  # From DB
-        'hai ba trung'
-        >>> expand_abbreviations("TPHL", province_context="quang ninh")
-        'ha long'
+        >>> expand_abbreviations("TX", province_context="ca mau")
+        'tan xuyen'
+        >>> expand_abbreviations("TX", province_context="ha noi")
+        'thanh xuan'
     """
     if not text:
         return text
@@ -155,21 +159,32 @@ def expand_abbreviations(text: str, use_db: bool = True, province_context: str =
     for pattern, replacement in COMMON_ABBREVIATION_PATTERNS:
         result = pattern.sub(replacement, result)
 
-    # Step 2: Apply database abbreviations (hbt→hai ba trung, etc.)
+    # Step 2 & 3: Apply database abbreviations (NEW: Try admin_divisions first, then abbreviations table)
     if use_db:
-        db_abbr = _load_db_abbreviations(province_context)
+        # Try admin_divisions first (with province_context)
+        from .db_utils import expand_abbreviation_from_admin
 
-        # Replace each abbreviation found in database
         words = result.split()
         expanded_words = []
 
         for word in words:
             # Clean word (remove punctuation)
             clean_word = word.strip('.,;:!?')
+            expanded = None
 
-            # Check if in database
-            if clean_word in db_abbr:
-                expanded_words.append(db_abbr[clean_word])
+            # Try admin_divisions (ward level) with province_context
+            if province_context:
+                expanded = expand_abbreviation_from_admin(clean_word, 'ward', province_context)
+
+            # Fallback to abbreviations table
+            if not expanded:
+                db_abbr = _load_db_abbreviations(province_context)
+                if clean_word in db_abbr:
+                    expanded = db_abbr[clean_word]
+
+            # Use expanded or original
+            if expanded:
+                expanded_words.append(expanded)
             else:
                 expanded_words.append(word)
 
@@ -204,7 +219,49 @@ def remove_special_chars(text: str, keep_spaces: bool = True) -> str:
 
 
 @lru_cache(maxsize=10000)
-def normalize_address(text: str, province_context: str = None) -> str:
+def finalize_normalization(text: str, keep_separators: bool = False) -> str:
+    """
+    Final normalization step: remove special chars, lowercase, and normalize whitespace.
+
+    This function is designed to be used after text has already been processed through
+    unicode normalization, abbreviation expansion, and accent removal.
+
+    Args:
+        text: Text that has already been normalized (unicode, abbr expanded, accents removed)
+        keep_separators: If True, preserve commas for structural parsing
+
+    Returns:
+        Finalized normalized text
+
+    Example:
+        >>> finalize_normalization("phuong dien bien, quan ba dinh")
+        'phuong dien bien quan ba dinh'
+        >>> finalize_normalization("phuong dien bien, quan ba dinh", keep_separators=True)
+        'phuong dien bien, quan ba dinh'
+    """
+    if not text or not isinstance(text, str):
+        return ""
+
+    result = text
+
+    # Remove special characters
+    if keep_separators:
+        # Keep commas for structural parsing, replace hyphens with spaces
+        # Hyphens often separate address components but break n-gram matching
+        result = re.sub(r'-', ' ', result)  # Replace hyphens with spaces first
+        result = re.sub(r'[^\w\s,]', ' ', result)  # Keep commas only
+    else:
+        result = remove_special_chars(result, keep_spaces=True)
+
+    # Lowercase and normalize whitespace
+    result = result.lower().strip()
+    result = WHITESPACE_PATTERN.sub(' ', result)
+
+    return result
+
+
+@lru_cache(maxsize=10000)
+def normalize_address(text: str, province_context: str = None, keep_separators: bool = False) -> str:
     """
     Full normalization pipeline for address text.
 
@@ -212,12 +269,13 @@ def normalize_address(text: str, province_context: str = None) -> str:
     1. Unicode normalization (NFC)
     2. Expand abbreviations (with province context if provided)
     3. Remove accents
-    4. Remove special chars
+    4. Remove special chars (optionally keep commas/dashes for structural parsing)
     5. Lowercase and trim
 
     Args:
         text: Raw address text
         province_context: Province name (normalized) for context-specific abbreviations (optional)
+        keep_separators: If True, preserve commas and dashes for structural parsing
 
     Returns:
         Normalized address text
@@ -225,8 +283,8 @@ def normalize_address(text: str, province_context: str = None) -> str:
     Example:
         >>> normalize_address("P. Điện Biên, Q. Ba Đình, HN")
         'phuong dien bien quan ba dinh hanoi'
-        >>> normalize_address("TPHL", province_context="quang ninh")
-        'ha long'
+        >>> normalize_address("XA YEN HO, DUC THO", keep_separators=True)
+        'xa yen ho, duc tho'
     """
     if not text or not isinstance(text, str):
         return ""
@@ -240,12 +298,8 @@ def normalize_address(text: str, province_context: str = None) -> str:
     # Step 3: Remove accents
     result = remove_vietnamese_accents(result)
 
-    # Step 4: Remove special characters
-    result = remove_special_chars(result, keep_spaces=True)
-
-    # Step 5: Lowercase and normalize whitespace
-    result = result.lower().strip()
-    result = WHITESPACE_PATTERN.sub(' ', result)
+    # Step 4: Finalize normalization (remove special chars, lowercase, trim)
+    result = finalize_normalization(result, keep_separators=keep_separators)
 
     return result
 
@@ -256,6 +310,7 @@ def clear_cache():
     normalize_unicode.cache_clear()
     expand_abbreviations.cache_clear()
     remove_special_chars.cache_clear()
+    finalize_normalization.cache_clear()
     normalize_address.cache_clear()
 
 
@@ -271,6 +326,7 @@ def get_cache_stats() -> dict:
         'normalize_unicode': normalize_unicode.cache_info()._asdict(),
         'expand_abbr': expand_abbreviations.cache_info()._asdict(),
         'remove_special': remove_special_chars.cache_info()._asdict(),
+        'finalize': finalize_normalization.cache_info()._asdict(),
         'normalize_full': normalize_address.cache_info()._asdict(),
     }
 
