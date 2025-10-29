@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
 """
+⚠️ DEPRECATED - USE V2 INSTEAD ⚠️
+
+This script is deprecated and NO LONGER FUNCTIONAL.
+It queries admin_divisions abbreviation columns which have been REMOVED.
+
+MIGRATION DATE: 2025-10-29
+REASON: Abbreviations moved to dedicated 'abbreviations' table
+
+USE INSTEAD: scripts/remove_token_abbreviations_v2.py
+
+The V2 script:
+- Queries the abbreviations table directly
+- Handles context-aware abbreviations properly
+- Has been tested and verified
+
+See TOKEN_REMOVAL_SUMMARY.md for details.
+
+---
+
+OLD DESCRIPTION (for reference):
 Script to remove abbreviations that are actual tokens in place names.
 
 Logic: If an abbreviation appears as a word in any địa danh, it's not really
@@ -15,6 +35,18 @@ import sys
 from pathlib import Path
 from typing import Set, Dict, List, Tuple
 from collections import defaultdict
+
+# Exit immediately if someone tries to run this
+print("=" * 80)
+print("⚠️  ERROR: This script is DEPRECATED")
+print("=" * 80)
+print("\nThis script queries admin_divisions abbreviation columns which")
+print("have been removed from the database.\n")
+print("USE INSTEAD: scripts/remove_token_abbreviations_v2.py\n")
+print("The V2 script works with the new abbreviations table structure.")
+print("See TOKEN_REMOVAL_SUMMARY.md for details.")
+print("=" * 80)
+sys.exit(1)
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))

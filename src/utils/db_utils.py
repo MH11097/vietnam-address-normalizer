@@ -150,17 +150,22 @@ def execute_query(query: str, params: tuple = ()) -> int:
         return cursor.rowcount
 
 
-@lru_cache(maxsize=128)
-def load_abbreviations(province_context: Optional[str] = None) -> Dict[str, str]:
+@lru_cache(maxsize=256)
+def load_abbreviations(
+    province_context: Optional[str] = None,
+    district_context: Optional[str] = None
+) -> Dict[str, str]:
     """
-    Load abbreviations from database with optional province context.
-    Priority: Context-specific > Global (context-specific overwrites global for same key)
+    Load abbreviations from database with optional province and district context.
+    Priority: District-specific > Province-specific > Global
+    (More specific context overwrites less specific for same key)
     Cached for performance.
 
     Args:
         province_context: Province name (normalized) to filter context-specific abbreviations.
                          If None, returns only global abbreviations.
-                         If provided, returns global + province-specific abbreviations.
+        district_context: District name (normalized) for ward-level disambiguation.
+                         Requires province_context to be set.
 
     Returns:
         Dictionary mapping abbreviation key to full word
@@ -173,25 +178,42 @@ def load_abbreviations(province_context: Optional[str] = None) -> Dict[str, str]
 
         >>> abbr_hn = load_abbreviations('ha noi')  # Global + Hanoi-specific
         >>> abbr_hn['tx']
-        'thanh xuan'  # Context-specific (ha noi) overrides generic 'thi xa'
+        'thanh xuan'  # Province-specific overrides generic 'thi xa'
+
+        >>> abbr_ward = load_abbreviations('ha noi', 'ba dinh')  # Include ward-level
+        >>> abbr_ward['db']
+        'dien bien'  # Ward-specific in Ba Dinh district
     """
     result = {}
 
-    # Step 1: Load global abbreviations first (lower priority)
-    query_global = "SELECT key, word FROM abbreviations WHERE province_context IS NULL"
+    # Step 1: Load global abbreviations first (lowest priority)
+    query_global = """
+        SELECT key, word FROM abbreviations
+        WHERE province_context IS NULL AND district_context IS NULL
+    """
     rows_global = query_all(query_global)
     for row in rows_global:
         result[row['key']] = row['word']
 
-    # Step 2: Load context-specific abbreviations (higher priority - overwrites global)
+    # Step 2: Load province-specific abbreviations (medium priority - overwrites global)
     if province_context:
-        query_context = """
+        query_province = """
             SELECT key, word FROM abbreviations
-            WHERE province_context = ?
+            WHERE province_context = ? AND district_context IS NULL
         """
-        rows_context = query_all(query_context, (province_context,))
-        for row in rows_context:
+        rows_province = query_all(query_province, (province_context,))
+        for row in rows_province:
             result[row['key']] = row['word']  # Overwrite global if exists
+
+        # Step 3: Load district-specific abbreviations (highest priority - overwrites all)
+        if district_context:
+            query_district = """
+                SELECT key, word FROM abbreviations
+                WHERE province_context = ? AND district_context = ?
+            """
+            rows_district = query_all(query_district, (province_context, district_context))
+            for row in rows_district:
+                result[row['key']] = row['word']  # Overwrite province/global if exists
 
     return result
 
@@ -199,88 +221,65 @@ def load_abbreviations(province_context: Optional[str] = None) -> Dict[str, str]
 def expand_abbreviation_from_admin(
     abbr: str,
     level: str = 'ward',
-    province_context: Optional[str] = None
+    province_context: Optional[str] = None,
+    district_context: Optional[str] = None
 ) -> Optional[str]:
     """
-    Expand abbreviation using admin_divisions table.
+    Expand abbreviation using abbreviations table (migrated from admin_divisions).
+
+    NOTE: This function now uses the abbreviations table instead of admin_divisions.
+    The admin_divisions abbreviation columns have been deprecated.
 
     Args:
         abbr: Abbreviation to expand (e.g., "tx", "bd")
-        level: Level to search - 'ward', 'district', or 'province'
+        level: Level to search - 'ward', 'district', or 'province' (kept for compatibility)
         province_context: Province context for disambiguation (recommended for ward/district)
+        district_context: District context for ward-level disambiguation
 
     Returns:
         Expanded name (normalized) or None if not found
 
     Example:
-        >>> expand_abbreviation_from_admin('tx', 'ward', 'ca mau')
-        'tan xuyen'
         >>> expand_abbreviation_from_admin('tx', 'ward', 'ha noi')
         'thanh xuan'
         >>> expand_abbreviation_from_admin('bd', 'district', 'ha noi')
         'ba dinh'
+        >>> expand_abbreviation_from_admin('db', 'ward', 'ha noi', 'ba dinh')
+        'dien bien'
     """
-    if not abbr or level not in ['province', 'district', 'ward']:
+    if not abbr:
         return None
 
     abbr = abbr.lower().strip()
 
-    # Build query based on level
-    if level == 'province':
-        query = """
-            SELECT DISTINCT province_name_normalized
-            FROM admin_divisions
-            WHERE province_abbreviation = ?
-            LIMIT 1
-        """
-        params = (abbr,)
+    # Query abbreviations table with context
+    # Note: We don't filter by level anymore since abbreviations table stores all levels
+    conditions = ["key = ?"]
+    params = [abbr]
 
-    elif level == 'district':
-        if province_context:
-            query = """
-                SELECT DISTINCT district_name_normalized
-                FROM admin_divisions
-                WHERE district_abbreviation = ?
-                  AND province_name_normalized = ?
-                LIMIT 1
-            """
-            params = (abbr, province_context)
-        else:
-            query = """
-                SELECT DISTINCT district_name_normalized
-                FROM admin_divisions
-                WHERE district_abbreviation = ?
-                LIMIT 1
-            """
-            params = (abbr,)
+    if province_context and district_context:
+        # Most specific: ward level
+        conditions.append("province_context = ?")
+        conditions.append("district_context = ?")
+        params.extend([province_context, district_context])
+    elif province_context:
+        # District level
+        conditions.append("province_context = ?")
+        conditions.append("district_context IS NULL")
+        params.append(province_context)
+    else:
+        # Global level (province)
+        conditions.append("province_context IS NULL")
+        conditions.append("district_context IS NULL")
 
-    else:  # ward
-        if province_context:
-            query = """
-                SELECT DISTINCT ward_name_normalized
-                FROM admin_divisions
-                WHERE ward_abbreviation = ?
-                  AND province_name_normalized = ?
-                LIMIT 1
-            """
-            params = (abbr, province_context)
-        else:
-            query = """
-                SELECT DISTINCT ward_name_normalized
-                FROM admin_divisions
-                WHERE ward_abbreviation = ?
-                LIMIT 1
-            """
-            params = (abbr,)
+    query = f"""
+        SELECT word FROM abbreviations
+        WHERE {' AND '.join(conditions)}
+        LIMIT 1
+    """
 
-    result = query_one(query, params)
-
-    if result:
-        # Return the first column value
-        col_name = f"{level}_name_normalized"
-        return result.get(col_name)
-
-    return None
+    result = query_one(query, tuple(params))
+    return result['word'] if result else None
 
 
 @lru_cache(maxsize=1)
@@ -591,6 +590,68 @@ def get_districts_by_province(province: str) -> List[Dict[str, Any]]:
     WHERE province_name_normalized = ?
     """
     return query_all(query, (province,))
+
+
+def check_province_district_collision(name: str) -> Dict[str, Any]:
+    """
+    Check if a normalized name exists as both a province and a district.
+
+    This handles cases like 'ben tre' which is both:
+    - A province: Tỉnh Bến Tre
+    - A district: Thành phố Bến Tre (within Tỉnh Bến Tre)
+
+    Args:
+        name: Normalized name to check (e.g., 'ben tre')
+
+    Returns:
+        Dict with collision info:
+        {
+            'has_collision': bool,
+            'province_name': str or None,
+            'district_name': str or None,
+            'district_province': str or None  # Which province contains the district
+        }
+
+    Example:
+        >>> result = check_province_district_collision('ben tre')
+        >>> result['has_collision']
+        True
+        >>> result['province_name']
+        'ben tre'
+        >>> result['district_name']
+        'ben tre'
+    """
+    # Check if name exists as province
+    province_query = """
+    SELECT DISTINCT province_name_normalized, province_full
+    FROM admin_divisions
+    WHERE province_name_normalized = ?
+    LIMIT 1
+    """
+    province_result = query_all(province_query, (name,))
+
+    # Check if name exists as district
+    district_query = """
+    SELECT DISTINCT
+        district_name_normalized,
+        district_full,
+        province_name_normalized
+    FROM admin_divisions
+    WHERE district_name_normalized = ?
+    LIMIT 1
+    """
+    district_result = query_all(district_query, (name,))
+
+    has_collision = len(province_result) > 0 and len(district_result) > 0
+
+    return {
+        'has_collision': has_collision,
+        'province_name': province_result[0]['province_name_normalized'] if province_result else None,
+        'district_name': district_result[0]['district_name_normalized'] if district_result else None,
+        'district_province': district_result[0]['province_name_normalized'] if district_result else None,
+        'province_full': province_result[0]['province_full'] if province_result else None,
+        'district_full': district_result[0]['district_full'] if district_result else None,
+    }
 
 
 def get_wards_by_district(province: str, district: str) -> List[Dict[str, Any]]:

@@ -236,6 +236,27 @@ def extract_explicit_patterns(tokens: List[str]) -> Dict[str, List[Tuple[str, in
     }
 
 
+def clean_token(token: str) -> str:
+    """
+    Clean token by removing trailing punctuation.
+
+    This fixes matching issues where tokens like "hiep," don't match "hiep" in database.
+
+    Args:
+        token: Raw token from text split
+
+    Returns:
+        Cleaned token without trailing punctuation
+
+    Example:
+        >>> clean_token("hiep,")
+        'hiep'
+        >>> clean_token("my")
+        'my'
+    """
+    return token.strip('.,;:!?')
+
+
 def generate_ngrams(tokens: List[str], max_n: int = 4) -> List[Tuple[str, Tuple[int, int]]]:
     """
     Generate n-grams from tokens (1-gram to max_n-gram).
@@ -272,7 +293,9 @@ def generate_ngrams(tokens: List[str], max_n: int = 4) -> List[Tuple[str, Tuple[
     for n in range(min(max_n, len(tokens)), 0, -1):
         for i in range(len(tokens) - n + 1):
             ngram_tokens = tokens[i:i+n]
-            ngram_text = ' '.join(ngram_tokens)
+            # Clean tokens to remove trailing punctuation (e.g., "hiep," → "hiep")
+            ngram_tokens_cleaned = [clean_token(t) for t in ngram_tokens]
+            ngram_text = ' '.join(ngram_tokens_cleaned)
             ngrams.append((ngram_text, (i, i+n)))
 
     if DEBUG_NGRAMS:
@@ -295,12 +318,15 @@ def match_in_set(
     province_filter: Optional[str] = None,
     district_filter: Optional[str] = None,
     level: str = 'ward'
-) -> Optional[Tuple[str, float]]:
+) -> List[Tuple[str, float]]:
     """
     Match n-gram against candidate set with exact/fuzzy matching.
 
     OPTIMIZED: Uses Token Index for pre-filtering (50-100x speedup).
     Reduces search space from 300-9,991 to 5-10 candidates.
+
+    NEW: Returns ALL best matches (multiple exact matches or multiple fuzzy matches with same top score)
+    to create multiple candidate branches for Phase 4 scoring.
 
     Args:
         ngram: N-gram text to match
@@ -311,11 +337,14 @@ def match_in_set(
         level: Level type ('province', 'district', 'ward', 'street')
 
     Returns:
-        (matched_string, score) or None
+        List of (matched_string, score) tuples. Empty list if no matches.
+        If multiple matches have the same best score, all are returned.
 
     Example:
         >>> match_in_set('dien bien', get_ward_set(), level='ward', province_filter='ha noi')
-        ('dien bien', 1.0)
+        [('dien bien', 1.0)]
+        >>> match_in_set('bac lieu', get_province_set(), level='province')  # Multiple exact matches
+        [('bac lieu', 1.0), ('bac lieu', 1.0)]  # If exists in both province and district
     """
     from ..config import DEBUG_EXTRACTION
 
@@ -329,10 +358,12 @@ def match_in_set(
         logger.debug(f"[MATCH] Testing '{ngram}' | level={level}, threshold={threshold:.2f}{filter_str}")
 
     # Exact match first (fastest - O(1))
+    # NEW: Don't return immediately - continue to find ALL exact matches or fuzzy matches
+    exact_matches = []
     if candidates and ngram in candidates:
+        exact_matches.append((ngram, 1.0))
         if DEBUG_EXTRACTION:
-            logger.debug(f"[MATCH] → Exact match!")
-        return (ngram, 1.0)
+            logger.debug(f"[MATCH] → Found exact match in fallback set!")
 
     # Use Token Index for pre-filtering (province/district/ward only)
     if level in ['province', 'district', 'ward']:
@@ -367,8 +398,22 @@ def match_in_set(
             if DEBUG_EXTRACTION:
                 logger.debug(f"[MATCH] Token Index: {len(token_candidates)} pre-filtered candidates")
 
+            # NEW: Check for exact matches in Token Index candidates
+            for candidate in token_candidates:
+                candidate_name = candidate['name']
+                if candidate_name == ngram:
+                    exact_matches.append((candidate_name, 1.0))
+                    if DEBUG_EXTRACTION:
+                        logger.debug(f"[MATCH] → Found exact match: '{candidate_name}'")
+
+            # If we have exact matches from Token Index, return them immediately
+            if exact_matches:
+                if DEBUG_EXTRACTION:
+                    logger.debug(f"[MATCH] → Returning {len(exact_matches)} exact match(es)")
+                return exact_matches
+
             # Fuzzy match on pre-filtered candidates (5-10 instead of 300-9,991)
-            best_match = None
+            # NEW: Find ALL matches with the best score (not just first one)
             best_score = 0
             all_scores = []  # Collect for smart logging
 
@@ -378,9 +423,14 @@ def match_in_set(
                 score = ensemble_fuzzy_score(ngram, candidate_name, log=False)
                 all_scores.append((candidate_name, score))
 
-                if score > best_score and score >= threshold:
+                if score >= threshold and score > best_score:
                     best_score = score
-                    best_match = candidate_name
+
+            # Collect ALL candidates with the best score
+            best_matches = []
+            for candidate_name, score in all_scores:
+                if score == best_score and score >= threshold:
+                    best_matches.append((candidate_name, score))
 
             # Smart logging based on DEBUG_FUZZY mode - ONLY if enabled
             if DEBUG_EXTRACTION:
@@ -390,25 +440,27 @@ def match_in_set(
                     # Sort by score descending
                     all_scores.sort(key=lambda x: x[1], reverse=True)
 
-                    if DEBUG_FUZZY == 'WINNERS' and best_match:
-                        # Only log the winner
-                        logger.debug(f"[MATCH]   WINNER: '{best_match}' [{best_score:.3f}]")
+                    if DEBUG_FUZZY == 'WINNERS' and best_matches:
+                        # Log all winners
+                        logger.debug(f"[MATCH]   WINNER(S): {len(best_matches)} match(es)")
+                        for name, score in best_matches:
+                            logger.debug(f"[MATCH]     '{name}' [{score:.3f}]")
                     elif DEBUG_FUZZY == 'TOP3':
                         # Log top 3
                         logger.debug(f"[MATCH]   Top 3 candidates:")
                         for name, score in all_scores[:3]:
-                            marker = " ← WINNER" if name == best_match else ""
+                            marker = " ← WINNER" if (name, score) in best_matches else ""
                             logger.debug(f"[MATCH]     '{name}': {score:.3f}{marker}")
                     elif DEBUG_FUZZY in [True, 'FULL']:
                         # Log all (original behavior)
                         for name, score in all_scores:
                             logger.debug(f"[MATCH]   '{name}': {score:.3f}")
 
-            if best_match:
+            if best_matches:
                 if DEBUG_EXTRACTION and DEBUG_FUZZY not in ['WINNERS', 'TOP3', True, 'FULL']:
-                    # If FUZZY logging is off but EXTRACTION is on, still log winner
-                    logger.debug(f"[MATCH] → WINNER: '{best_match}' [{best_score:.3f}]")
-                return (best_match, best_score)
+                    # If FUZZY logging is off but EXTRACTION is on, still log winners
+                    logger.debug(f"[MATCH] → WINNER(S): {len(best_matches)} match(es) with score {best_score:.3f}")
+                return best_matches
 
         except Exception as e:
             # Fallback to brute force if Token Index fails
@@ -417,26 +469,37 @@ def match_in_set(
             pass
 
     # Fallback: Brute force for streets or if Token Index unavailable
+    # Return exact_matches if already found from fallback set
+    if exact_matches:
+        if DEBUG_EXTRACTION:
+            logger.debug(f"[MATCH] → Returning {len(exact_matches)} exact match(es) from fallback set")
+        return exact_matches
+
     candidate_names = list(candidates) if candidates else []
 
     if not candidate_names:
         if DEBUG_EXTRACTION:
             logger.debug(f"[MATCH] → No match (no candidates)")
-        return None
+        return []
 
     if DEBUG_EXTRACTION:
         logger.debug(f"[MATCH] Brute force: testing {len(candidate_names)} candidates")
 
-    best_match = None
+    # NEW: Find ALL matches with the best score
     best_score = 0
     all_scores = []
 
     for candidate in candidate_names:
         score = ensemble_fuzzy_score(ngram, candidate, log=False)  # Don't log individual comparisons
         all_scores.append((candidate, score))
-        if score > best_score and score >= threshold:
+        if score >= threshold and score > best_score:
             best_score = score
-            best_match = candidate
+
+    # Collect ALL candidates with the best score
+    best_matches = []
+    for candidate_name, score in all_scores:
+        if score == best_score and score >= threshold:
+            best_matches.append((candidate_name, score))
 
     # Smart logging - ONLY if DEBUG_FUZZY is enabled
     if DEBUG_EXTRACTION:
@@ -445,26 +508,28 @@ def match_in_set(
         if DEBUG_FUZZY and all_scores:
             all_scores.sort(key=lambda x: x[1], reverse=True)
 
-            if DEBUG_FUZZY == 'WINNERS' and best_match:
-                logger.debug(f"[MATCH]   WINNER: '{best_match}' [{best_score:.3f}]")
+            if DEBUG_FUZZY == 'WINNERS' and best_matches:
+                logger.debug(f"[MATCH]   WINNER(S): {len(best_matches)} match(es)")
+                for name, score in best_matches:
+                    logger.debug(f"[MATCH]     '{name}' [{score:.3f}]")
             elif DEBUG_FUZZY == 'TOP3':
                 logger.debug(f"[MATCH]   Top 3 candidates:")
                 for name, score in all_scores[:3]:
-                    marker = " ← WINNER" if name == best_match else ""
+                    marker = " ← WINNER" if (name, score) in best_matches else ""
                     logger.debug(f"[MATCH]     '{name}': {score:.3f}{marker}")
             elif DEBUG_FUZZY in [True, 'FULL']:
                 for name, score in all_scores:
                     logger.debug(f"[MATCH]   '{name}': {score:.3f}")
 
-    if best_match:
+    if best_matches:
         if DEBUG_EXTRACTION and DEBUG_FUZZY not in ['WINNERS', 'TOP3', True, 'FULL']:
-            logger.debug(f"[MATCH] → WINNER: '{best_match}' [{best_score:.3f}]")
-        return (best_match, best_score)
+            logger.debug(f"[MATCH] → WINNER(S): {len(best_matches)} match(es) with score {best_score:.3f}")
+        return best_matches
 
     if DEBUG_EXTRACTION:
         logger.debug(f"[MATCH] → No match (best score: {best_score:.3f} < threshold {threshold:.2f})")
 
-    return None
+    return []
 
 
 def extract_with_database(
@@ -1208,7 +1273,7 @@ def extract_province_candidates(
     tokens: List[str],
     province_known: Optional[str] = None,
     fuzzy_threshold: float = 0.90
-) -> List[Tuple[str, float, str]]:
+) -> List[Tuple[str, float, str, bool]]:
     """
     Extract province candidates from multiple sources (mimics human reading).
 
@@ -1223,14 +1288,19 @@ def extract_province_candidates(
         fuzzy_threshold: Minimum fuzzy score for full scan (default: 0.6)
 
     Returns:
-        List of (province_name, score, source) tuples, sorted by score DESC
+        List of (province_name, score, source, has_district_collision) tuples, sorted by score DESC
+        - has_district_collision: True if this province name also exists as a district name
 
     Example:
         >>> extract_province_candidates(['phuong', '3', 'dha', 'quang', 'tri'], province_known='quang tri')
-        [('quang tri', 1.0, 'known')]
+        [('quang tri', 1.0, 'known', False)]
         >>> extract_province_candidates(['bach', 'khoa', 'ha', 'noi'])
-        [('ha noi', 1.0, 'rightmost'), ...]
+        [('ha noi', 1.0, 'rightmost', False), ...]
+        >>> extract_province_candidates(['phuong', '5', 'ben', 'tre'])
+        [('ben tre', 1.0, 'rightmost', True), ...]  # ben tre is both province AND district
     """
+    from .db_utils import check_province_district_collision
+
     candidates = []
     province_set = get_province_set()
 
@@ -1270,8 +1340,29 @@ def extract_province_candidates(
             # Only known, not in text → Normal priority
             candidates.append((province_known, 1.0, 'known'))
 
-        # Don't return early - continue to find other province candidates
-        # This allows checking alternative interpretations (e.g., known province is wrong)
+        # Remove duplicates and check for province/district collisions
+        result = []
+        for prov, score, source in candidates:
+            collision_info = check_province_district_collision(prov)
+            has_collision = collision_info['has_collision']
+            result.append((prov, score, source, has_collision))
+
+        # Adjust scores based on position
+        adjusted_result = []
+        for prov, score, source, has_collision in result:
+            adjusted_scores = adjust_scores_by_position([(prov, score, source)], tokens, name_index=0)
+            if adjusted_scores:
+                adjusted_result.append((adjusted_scores[0][0], adjusted_scores[0][1], adjusted_scores[0][2], has_collision))
+            else:
+                adjusted_result.append((prov, score, source, has_collision))
+
+        # Sort by score DESC
+        adjusted_result.sort(key=lambda x: x[1], reverse=True)
+
+        # IMPORTANT: If province_known is provided, return only it
+        # Don't search for alternative candidates - known province is 100% trusted
+        # This prevents false positives from province names appearing in the address text
+        return adjusted_result
 
     # Source 2: Rightmost tokens (last 1-3 words)
     # Vietnamese addresses typically end with province
@@ -1283,35 +1374,38 @@ def extract_province_candidates(
         rightmost_ngrams.append((ngram_text, ngram_key))
 
     for ngram, ngram_key in rightmost_ngrams:
-        match_result = match_in_set(
+        match_results = match_in_set(
             ngram,
             province_set,
             threshold=0.95,  # Very strict threshold for rightmost (high confidence area)
             level='province'
         )
-        if match_result:
-            candidates.append((match_result[0], match_result[1], 'rightmost'))
+        # NEW: match_in_set now returns list of tuples
+        for match_name, match_score in match_results:
+            candidates.append((match_name, match_score, 'rightmost'))
 
-    # Source 3: Full n-gram scan (fallback)
-    # Only scan if no rightmost matches found (to avoid duplicates)
-    if not candidates:
-        all_ngrams = generate_ngrams(tokens, max_n=3)
-        for ngram, ngram_key in all_ngrams:
-            # Skip numeric tokens
-            if ngram.isdigit():
-                continue
-            # Skip noise words
-            if has_noise_word(ngram, tokens, ngram_key[0], ngram_key[1]):
-                continue
+    # Source 3: Full n-gram scan
+    # CHANGED: Always run full scan (not just when no rightmost match)
+    # This ensures we find ALL exact matches in text
+    # Deduplicate logic (line 1386) will handle duplicates
+    all_ngrams = generate_ngrams(tokens, max_n=3)
+    for ngram, ngram_key in all_ngrams:
+        # Skip numeric tokens
+        if ngram.isdigit():
+            continue
+        # Skip noise words
+        if has_noise_word(ngram, tokens, ngram_key[0], ngram_key[1]):
+            continue
 
-            match_result = match_in_set(
-                ngram,
-                province_set,
-                threshold=fuzzy_threshold,
-                level='province'
-            )
-            if match_result:
-                candidates.append((match_result[0], match_result[1], 'full_scan'))
+        match_results = match_in_set(
+            ngram,
+            province_set,
+            threshold=fuzzy_threshold,
+            level='province'
+        )
+        # NEW: match_in_set now returns list of tuples
+        for match_name, match_score in match_results:
+            candidates.append((match_name, match_score, 'full_scan'))
 
     # Remove duplicates (keep highest score for each province)
     # Priority: known_and_in_text (1.2) > known (1.0) > rightmost/full_scan
@@ -1334,16 +1428,28 @@ def extract_province_candidates(
             elif score == existing_score and source_priority.get(source, 0) > source_priority.get(existing_source, 0):
                 unique_candidates[prov] = (score, source)
 
-    # Convert back to list
-    result = [(prov, score, source) for prov, (score, source) in unique_candidates.items()]
+    # Convert back to list and check for province/district collisions
+    result = []
+    for prov, (score, source) in unique_candidates.items():
+        # Check if this province name also exists as a district
+        collision_info = check_province_district_collision(prov)
+        has_collision = collision_info['has_collision']
+        result.append((prov, score, source, has_collision))
 
     # Adjust scores based on position (tokens at end are more reliable)
-    result = adjust_scores_by_position(result, tokens, name_index=0)
+    # Update to handle 4-tuple format
+    adjusted_result = []
+    for prov, score, source, has_collision in result:
+        adjusted_scores = adjust_scores_by_position([(prov, score, source)], tokens, name_index=0)
+        if adjusted_scores:
+            adjusted_result.append((adjusted_scores[0][0], adjusted_scores[0][1], adjusted_scores[0][2], has_collision))
+        else:
+            adjusted_result.append((prov, score, source, has_collision))
 
     # Sort by score DESC, then by source priority
-    result.sort(key=lambda x: (x[1], source_priority.get(x[2], 0)), reverse=True)
+    adjusted_result.sort(key=lambda x: (x[1], source_priority.get(x[2], 0)), reverse=True)
 
-    return result
+    return adjusted_result
 
 
 def extract_district_scoped(
@@ -1351,14 +1457,15 @@ def extract_district_scoped(
     province_context: str,
     province_tokens_used: Tuple[int, int],
     district_known: Optional[str] = None,
-    fuzzy_threshold: float = 0.90
+    fuzzy_threshold: float = 0.90,
+    allow_token_reuse: bool = False
 ) -> List[Tuple[str, float, str, Tuple[int, int]]]:
     """
     Extract district candidates scoped to a specific province.
 
     Strategy:
     1. If district_known provided, return it directly (100% confidence)
-    2. Remove province tokens from search space
+    2. Remove province tokens from search space (unless allow_token_reuse=True)
     3. Check rightmost remaining tokens first (where district usually appears)
     4. Try abbreviation expansion with province context (e.g., "DHA" + "quang tri" → "dong ha")
     5. Fuzzy match with districts of the province
@@ -1370,6 +1477,7 @@ def extract_district_scoped(
         province_tokens_used: (start_idx, end_idx) of province in tokens
         district_known: Known district value (optional, trusted 100%)
         fuzzy_threshold: Minimum fuzzy score (default: 0.5, lower because we have province context)
+        allow_token_reuse: If True, allow district search on province tokens (for collision cases)
 
     Returns:
         List of (district_name, score, source, (start_idx, end_idx)) tuples
@@ -1377,6 +1485,8 @@ def extract_district_scoped(
     Example:
         >>> extract_district_scoped(['phuong', '3', 'dha'], 'quang tri', (3, 3), None)
         [('dong ha', 0.67, 'fuzzy', (2, 3))]
+        >>> extract_district_scoped(['phuong', '5', 'ben', 'tre'], 'ben tre', (2, 4), allow_token_reuse=True)
+        [('ben tre', 1.0, 'exact', (2, 4))]  # Reuses province tokens for district match
     """
     candidates = []
 
@@ -1396,7 +1506,8 @@ def extract_district_scoped(
         return []  # No districts for this province (shouldn't happen)
 
     # Remove province tokens from search space
-    # Create mask of available tokens (not used by province)
+    # COLLISION FIX: If allow_token_reuse=True, include province tokens in district search
+    # This handles cases where province name == district name (e.g., "ben tre")
     prov_start, prov_end = province_tokens_used
 
     # Log token removal
@@ -1408,8 +1519,13 @@ def extract_district_scoped(
 
     available_tokens = []
     for i, token in enumerate(tokens):
-        if i < prov_start or i >= prov_end:
+        # If allow_token_reuse, include ALL tokens (even province tokens)
+        # Otherwise, exclude province tokens
+        if allow_token_reuse or i < prov_start or i >= prov_end:
             available_tokens.append((i, token))
+
+    if allow_token_reuse:
+        logger.debug(f"[⚠️ COLLISION] Token reuse enabled - including province tokens in district search")
 
     logger.debug(f"[TOKEN] Remaining tokens for district search: {len(available_tokens)} tokens")
     logger.debug(f"[TOKEN] Available: {[t for _, t in available_tokens]}")
@@ -1442,46 +1558,52 @@ def extract_district_scoped(
                 continue
 
         # Fuzzy match with districts of this province
-        match_result = match_in_set(
+        match_results = match_in_set(
             ngram_text,
             districts_set,
             threshold=fuzzy_threshold,
             province_filter=province_context,
             level='district'
         )
-        if match_result:
-            candidates.append((match_result[0], match_result[1], 'fuzzy', (start_idx, end_idx)))
+        # NEW: match_in_set now returns list of tuples
+        for match_name, match_score in match_results:
+            candidates.append((match_name, match_score, 'fuzzy', (start_idx, end_idx)))
 
-    # Source 3: Full scan of remaining tokens (if no rightmost match)
-    if not candidates:
-        for i, (token_idx, token) in enumerate(available_tokens):
-            # Try n-grams starting from this position
-            for n in range(min(3, len(available_tokens) - i), 0, -1):
-                ngram_tokens_data = available_tokens[i:i+n]
-                ngram_tokens = [t for _, t in ngram_tokens_data]
-                ngram_text = ' '.join(ngram_tokens)
-                start_idx = ngram_tokens_data[0][0]
-                end_idx = ngram_tokens_data[-1][0] + 1
+    # Source 3: Full scan of remaining tokens
+    # CHANGED: Always run full scan (not just when no rightmost match)
+    # This ensures we find ALL exact matches in text (e.g., "THANH CHUONG" + "VINH")
+    # Deduplicate logic (line 1625) will handle duplicates if same match found in both sources
+    for i, (token_idx, token) in enumerate(available_tokens):
+        # Try n-grams starting from this position
+        for n in range(min(3, len(available_tokens) - i), 0, -1):
+            ngram_tokens_data = available_tokens[i:i+n]
+            ngram_tokens = [t for _, t in ngram_tokens_data]
+            # Clean tokens to remove trailing punctuation
+            ngram_tokens_cleaned = [clean_token(t) for t in ngram_tokens]
+            ngram_text = ' '.join(ngram_tokens_cleaned)
+            start_idx = ngram_tokens_data[0][0]
+            end_idx = ngram_tokens_data[-1][0] + 1
 
-                if ngram_text.isdigit():
-                    continue
+            if ngram_text.isdigit():
+                continue
 
-                # Try abbreviation expansion
-                expanded = expand_abbreviations(ngram_text, use_db=True, province_context=province_context)
-                if expanded != ngram_text.lower() and expanded in districts_set:
-                    candidates.append((expanded, 1.0, 'abbreviation', (start_idx, end_idx)))
-                    continue
+            # Try abbreviation expansion
+            expanded = expand_abbreviations(ngram_text, use_db=True, province_context=province_context)
+            if expanded != ngram_text.lower() and expanded in districts_set:
+                candidates.append((expanded, 1.0, 'abbreviation', (start_idx, end_idx)))
+                continue
 
-                # Fuzzy match
-                match_result = match_in_set(
-                    ngram_text,
-                    districts_set,
-                    threshold=fuzzy_threshold,
-                    province_filter=province_context,
-                    level='district'
-                )
-                if match_result:
-                    candidates.append((match_result[0], match_result[1], 'fuzzy', (start_idx, end_idx)))
+            # Fuzzy match
+            match_results = match_in_set(
+                ngram_text,
+                districts_set,
+                threshold=fuzzy_threshold,
+                province_filter=province_context,
+                level='district'
+            )
+            # NEW: match_in_set now returns list of tuples
+            for match_name, match_score in match_results:
+                candidates.append((match_name, match_score, 'fuzzy', (start_idx, end_idx)))
 
     # FALLBACK: If no district found, try finding ward and infer district
     if not candidates:
@@ -1498,7 +1620,9 @@ def extract_district_scoped(
             for n in range(min(3, len(available_tokens) - i), 0, -1):
                 ngram_tokens_data = available_tokens[i:i+n]
                 ngram_tokens = [t for _, t in ngram_tokens_data]
-                ngram_text = ' '.join(ngram_tokens)
+                # Clean tokens to remove trailing punctuation
+                ngram_tokens_cleaned = [clean_token(t) for t in ngram_tokens]
+                ngram_text = ' '.join(ngram_tokens_cleaned)
                 start_idx = ngram_tokens_data[0][0]
                 end_idx = ngram_tokens_data[-1][0] + 1
 
@@ -1506,16 +1630,15 @@ def extract_district_scoped(
                     continue
 
                 # Try ward match (higher threshold since it's a fallback)
-                match_result = match_in_set(
+                match_results = match_in_set(
                     ngram_text,
                     wards_set,
                     threshold=0.95,  # Higher threshold for ward fallback
                     province_filter=province_context,
                     level='ward'
                 )
-                if match_result:
-                    ward_name = match_result[0]
-                    ward_score = match_result[1]
+                # NEW: match_in_set now returns list of tuples
+                for ward_name, ward_score in match_results:
                     logger.debug(f"[INFERENCE] Found ward '{ward_name}' (score: {ward_score:.3f}), inferring district...")
                     # Infer district from ward
                     inferred_district = infer_district_from_ward(province_context, ward_name)
@@ -1697,44 +1820,50 @@ def extract_ward_scoped(
         # Check ward patterns
         for ward_name, rel_start, rel_end in explicit_patterns['wards']:
             # Validate ward_name in wards_set
-            match_result = match_in_set(
+            match_results = match_in_set(
                 ward_name,
                 wards_set,
                 threshold=0.7,
                 level='ward'
             )
-            if match_result:
+            # NEW: match_in_set now returns list of tuples
+            for match_name, match_score in match_results:
                 # Map relative indices to absolute indices
                 abs_start = seq_indices[rel_start] if rel_start < len(seq_indices) else seq_indices[-1]
                 abs_end = seq_indices[rel_end-1] + 1 if rel_end <= len(seq_indices) else seq_indices[-1] + 1
-                candidates.append((match_result[0], match_result[1], 'explicit_pattern', (abs_start, abs_end)))
+                candidates.append((match_name, match_score, 'explicit_pattern', (abs_start, abs_end)))
 
-    # Source 2: Fuzzy match available tokens (if no explicit patterns found)
-    if not candidates:
-        for i, (token_idx, token) in enumerate(available_tokens):
-            # Try n-grams starting from this position
-            for n in range(min(3, len(available_tokens) - i), 0, -1):
-                ngram_tokens_data = available_tokens[i:i+n]
-                ngram_tokens = [t for _, t in ngram_tokens_data]
-                ngram_text = ' '.join(ngram_tokens)
-                start_idx = ngram_tokens_data[0][0]
-                end_idx = ngram_tokens_data[-1][0] + 1
+    # Source 2: Fuzzy match available tokens
+    # CHANGED: Always run fuzzy match (not just when no explicit patterns)
+    # This ensures we find ALL matches in text
+    # Deduplicate logic (line 1838) will handle duplicates
+    for i, (token_idx, token) in enumerate(available_tokens):
+        # Try n-grams starting from this position
+        for n in range(min(3, len(available_tokens) - i), 0, -1):
+            ngram_tokens_data = available_tokens[i:i+n]
+            ngram_tokens = [t for _, t in ngram_tokens_data]
+            # Clean tokens to remove trailing punctuation
+            ngram_tokens_cleaned = [clean_token(t) for t in ngram_tokens]
+            ngram_text = ' '.join(ngram_tokens_cleaned)
+            start_idx = ngram_tokens_data[0][0]
+            end_idx = ngram_tokens_data[-1][0] + 1
 
-                # Skip if just numbers (unless it matches a ward name like "1", "2")
-                if ngram_text.isdigit() and len(ngram_text) > 2:
-                    continue
+            # Skip if just numbers (unless it matches a ward name like "1", "2")
+            if ngram_text.isdigit() and len(ngram_text) > 2:
+                continue
 
-                # Fuzzy match with wards
-                match_result = match_in_set(
-                    ngram_text,
-                    wards_set,
-                    threshold=fuzzy_threshold if not ngram_text.isdigit() else 1.0,  # Exact for numbers
-                    province_filter=province_context,
-                    district_filter=district_context,
-                    level='ward'
-                )
-                if match_result:
-                    candidates.append((match_result[0], match_result[1], 'fuzzy', (start_idx, end_idx)))
+            # Fuzzy match with wards
+            match_results = match_in_set(
+                ngram_text,
+                wards_set,
+                threshold=fuzzy_threshold if not ngram_text.isdigit() else 1.0,  # Exact for numbers
+                province_filter=province_context,
+                district_filter=district_context,
+                level='ward'
+            )
+            # NEW: match_in_set now returns list of tuples
+            for match_name, match_score in match_results:
+                candidates.append((match_name, match_score, 'fuzzy', (start_idx, end_idx)))
 
     # Remove duplicates (keep highest score)
     unique_candidates = {}
@@ -1828,8 +1957,9 @@ def build_search_tree(
     logger.debug("\n[🔍 DEBUG]   [STEP 1] PROVINCE EXTRACTION")
     province_candidates = extract_province_candidates(tokens, province_known, fuzzy_threshold=0.90)
     logger.debug(f"[🔍 DEBUG]   📤 Found {len(province_candidates)} province candidates")
-    for i, (name, score, source) in enumerate(province_candidates[:3], 1):
-        logger.debug(f"[🔍 DEBUG]      {i}. '{name}' (score: {score:.3f}, source: {source})")
+    for i, (name, score, source, has_collision) in enumerate(province_candidates[:3], 1):
+        collision_marker = " [⚠️ COLLISION: also exists as district]" if has_collision else ""
+        logger.debug(f"[🔍 DEBUG]      {i}. '{name}' (score: {score:.3f}, source: {source}){collision_marker}")
 
     if not province_candidates:
         # No province found - return empty
@@ -1838,9 +1968,11 @@ def build_search_tree(
     # STEP 2: For each province candidate → Search district
     # Process ALL province candidates (not just first one) to check both interpretations
     # Example: "BAC LIEU" can be province OR district - generate candidates for both
+    # PRIORITY FIX: When collision detected (province name == district name), prioritize district interpretation
     logger.debug(f"\n[🔍 DEBUG]   [STEP 2] DISTRICT EXTRACTION (foreach province)")
-    for idx, (prov_name, prov_score, prov_source) in enumerate(province_candidates[:max_branches], 1):
+    for idx, (prov_name, prov_score, prov_source, has_collision) in enumerate(province_candidates[:max_branches], 1):
         logger.debug(f"\n[🔍 DEBUG]   ─── Province {idx}/{min(len(province_candidates), max_branches)}: '{prov_name}' ───")
+
         # Determine province token position
         # If known-only (not in text), position is (-1, -1)
         # If known_and_in_text or found in text, find actual position
@@ -1861,13 +1993,22 @@ def build_search_tree(
             logger.debug(f"[TOKEN] Province '{prov_name}' matched at positions {prov_token_pos}")
             logger.debug(f"[TOKEN] Province tokens: {tokens[prov_token_pos[0]:prov_token_pos[1]]}")
 
+        # COLLISION HANDLING: If province name also exists as district, allow token reuse
+        # This fixes cases like "BEN TRE" which is both province and district
+        # Priority: District interpretation > Province-only interpretation
+        collision_override = has_collision
+        if collision_override:
+            logger.debug(f"[⚠️ COLLISION] '{prov_name}' exists as both province and district")
+            logger.debug(f"[⚠️ COLLISION] Allowing district search to reuse province tokens")
+
         # Extract district candidates for this province
         district_candidates = extract_district_scoped(
             tokens,
             province_context=prov_name,
             province_tokens_used=prov_token_pos,
             district_known=district_known,
-            fuzzy_threshold=0.90
+            fuzzy_threshold=0.90,
+            allow_token_reuse=collision_override  # Allow reuse when collision detected
         )
 
         logger.debug(f"[🔍 DEBUG]   📤 Found {len(district_candidates)} district candidates")

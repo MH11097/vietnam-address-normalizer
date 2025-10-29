@@ -1,4 +1,21 @@
 """
+⚠️ DEPRECATED - DO NOT USE ⚠️
+
+This script is deprecated and NO LONGER FUNCTIONAL.
+It references admin_divisions abbreviation columns which have been REMOVED.
+
+MIGRATION DATE: 2025-10-29
+REASON: Abbreviations moved to dedicated 'abbreviations' table with context-aware system
+
+REPLACEMENT SCRIPTS:
+- For migration: scripts/migrate_abbreviations_from_admin.py
+- For token removal: scripts/remove_token_abbreviations_v2.py
+
+See MIGRATION_SUMMARY.md for details.
+
+---
+
+OLD DESCRIPTION (for reference):
 Script to populate abbreviation columns in admin_divisions table.
 
 Generates abbreviations using first letters of words.
@@ -11,6 +28,19 @@ import re
 import sys
 import sqlite3
 from pathlib import Path
+
+# Exit immediately if someone tries to run this
+print("=" * 80)
+print("⚠️  ERROR: This script is DEPRECATED and no longer functional")
+print("=" * 80)
+print("\nThe admin_divisions abbreviation columns have been removed.")
+print("The system now uses a dedicated 'abbreviations' table.\n")
+print("Replacement scripts:")
+print("  - Migration: scripts/migrate_abbreviations_from_admin.py")
+print("  - Token removal: scripts/remove_token_abbreviations_v2.py\n")
+print("See MIGRATION_SUMMARY.md for migration details.")
+print("=" * 80)
+sys.exit(1)
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))

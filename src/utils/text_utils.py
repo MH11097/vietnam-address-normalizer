@@ -102,22 +102,26 @@ def normalize_unicode(text: str) -> str:
     return unicodedata.normalize('NFC', text)
 
 
-def _load_db_abbreviations(province_context: str = None) -> Dict[str, str]:
+def _load_db_abbreviations(
+    province_context: str = None,
+    district_context: str = None
+) -> Dict[str, str]:
     """
-    Load abbreviations from database with optional province context.
+    Load abbreviations from database with optional province and district context.
 
-    Note: This function is NOT cached at module level anymore, since it depends on province_context.
+    Note: This function is NOT cached at module level anymore, since it depends on contexts.
     Caching is handled by the load_abbreviations() function itself.
 
     Args:
         province_context: Province name (normalized) for context-specific abbreviations
+        district_context: District name (normalized) for ward-level abbreviations
 
     Returns:
         Dict mapping abbreviation key to full word
     """
     try:
         from .db_utils import load_abbreviations
-        return load_abbreviations(province_context)
+        return load_abbreviations(province_context, district_context)
     except Exception as e:
         # Fallback to empty dict if database not available
         print(f"Warning: Could not load abbreviations from database: {e}")
@@ -125,19 +129,24 @@ def _load_db_abbreviations(province_context: str = None) -> Dict[str, str]:
 
 
 @lru_cache(maxsize=10000)
-def expand_abbreviations(text: str, use_db: bool = True, province_context: str = None) -> str:
+def expand_abbreviations(
+    text: str,
+    use_db: bool = True,
+    province_context: str = None,
+    district_context: str = None
+) -> str:
     """
     Expand common Vietnamese address abbreviations.
 
     Priority order:
     1. Hardcoded patterns (P., Q., TP.)
-    2. admin_divisions abbreviations (with province_context for disambiguation)
-    3. abbreviations table (common terms: HCM, HN, SG)
+    2. abbreviations table with full context (province + district > province > global)
 
     Args:
         text: Input text with abbreviations
         use_db: Whether to load abbreviations from database (default: True)
         province_context: Province name (normalized) for context-specific abbreviations (optional)
+        district_context: District name (normalized) for ward-level abbreviations (optional)
 
     Returns:
         Text with expanded abbreviations
@@ -145,10 +154,10 @@ def expand_abbreviations(text: str, use_db: bool = True, province_context: str =
     Example:
         >>> expand_abbreviations("P. 1, Q. 2, TP. HCM")
         'phuong 1, quan 2, thanh pho ho chi minh'
-        >>> expand_abbreviations("TX", province_context="ca mau")
-        'tan xuyen'
         >>> expand_abbreviations("TX", province_context="ha noi")
         'thanh xuan'
+        >>> expand_abbreviations("DB", province_context="ha noi", district_context="ba dinh")
+        'dien bien'
     """
     if not text:
         return text
@@ -159,10 +168,10 @@ def expand_abbreviations(text: str, use_db: bool = True, province_context: str =
     for pattern, replacement in COMMON_ABBREVIATION_PATTERNS:
         result = pattern.sub(replacement, result)
 
-    # Step 2 & 3: Apply database abbreviations (NEW: Try admin_divisions first, then abbreviations table)
+    # Step 2: Apply database abbreviations with context priority
     if use_db:
-        # Try admin_divisions first (with province_context)
-        from .db_utils import expand_abbreviation_from_admin
+        # Load abbreviations with full context (handles priority internally)
+        db_abbr = _load_db_abbreviations(province_context, district_context)
 
         words = result.split()
         expanded_words = []
@@ -170,21 +179,10 @@ def expand_abbreviations(text: str, use_db: bool = True, province_context: str =
         for word in words:
             # Clean word (remove punctuation)
             clean_word = word.strip('.,;:!?')
-            expanded = None
 
-            # Try admin_divisions (ward level) with province_context
-            if province_context:
-                expanded = expand_abbreviation_from_admin(clean_word, 'ward', province_context)
-
-            # Fallback to abbreviations table
-            if not expanded:
-                db_abbr = _load_db_abbreviations(province_context)
-                if clean_word in db_abbr:
-                    expanded = db_abbr[clean_word]
-
-            # Use expanded or original
-            if expanded:
-                expanded_words.append(expanded)
+            # Check if abbreviation exists in loaded dict
+            if clean_word in db_abbr:
+                expanded_words.append(db_abbr[clean_word])
             else:
                 expanded_words.append(word)
 
@@ -261,13 +259,18 @@ def finalize_normalization(text: str, keep_separators: bool = False) -> str:
 
 
 @lru_cache(maxsize=10000)
-def normalize_address(text: str, province_context: str = None, keep_separators: bool = False) -> str:
+def normalize_address(
+    text: str,
+    province_context: str = None,
+    district_context: str = None,
+    keep_separators: bool = False
+) -> str:
     """
     Full normalization pipeline for address text.
 
     Steps:
     1. Unicode normalization (NFC)
-    2. Expand abbreviations (with province context if provided)
+    2. Expand abbreviations (with province and district context if provided)
     3. Remove accents
     4. Remove special chars (optionally keep commas/dashes for structural parsing)
     5. Lowercase and trim
@@ -275,6 +278,7 @@ def normalize_address(text: str, province_context: str = None, keep_separators: 
     Args:
         text: Raw address text
         province_context: Province name (normalized) for context-specific abbreviations (optional)
+        district_context: District name (normalized) for ward-level abbreviations (optional)
         keep_separators: If True, preserve commas and dashes for structural parsing
 
     Returns:
@@ -283,8 +287,8 @@ def normalize_address(text: str, province_context: str = None, keep_separators: 
     Example:
         >>> normalize_address("P. Điện Biên, Q. Ba Đình, HN")
         'phuong dien bien quan ba dinh hanoi'
-        >>> normalize_address("XA YEN HO, DUC THO", keep_separators=True)
-        'xa yen ho, duc tho'
+        >>> normalize_address("DB", province_context="ha noi", district_context="ba dinh")
+        'dien bien'
     """
     if not text or not isinstance(text, str):
         return ""
@@ -292,8 +296,8 @@ def normalize_address(text: str, province_context: str = None, keep_separators: 
     # Step 1: Unicode normalization
     result = normalize_unicode(text)
 
-    # Step 2: Expand abbreviations (with province context)
-    result = expand_abbreviations(result, province_context=province_context)
+    # Step 2: Expand abbreviations (with province and district context)
+    result = expand_abbreviations(result, province_context=province_context, district_context=district_context)
 
     # Step 3: Remove accents
     result = remove_vietnamese_accents(result)

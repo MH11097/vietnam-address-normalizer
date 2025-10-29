@@ -17,6 +17,7 @@ if sys.platform == 'win32':
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 from src.processors.phase1_preprocessing import preprocess
+from src.processors.phase2_structural import structural_parse
 from src.processors.phase3_extraction import extract_components
 from src.processors.phase4_candidates import generate_candidates
 from src.processors.phase5_validation import validate_and_rank
@@ -24,6 +25,7 @@ from src.processors.phase6_postprocessing import postprocess
 from src.utils.db_utils import query_all
 from src.utils.text_utils import normalize_hint
 from src.utils.iterative_preprocessing import iterative_preprocess, should_use_iterative
+from src.utils.extraction_utils import lookup_full_names
 
 
 # Custom logging formatter với màu sắc
@@ -176,27 +178,76 @@ def process_one_address(address_text, province_known=None, district_known=None):
     normalized_display = p1['normalized'][:80] + ('...' if len(p1['normalized']) > 80 else '')
     print(f"  └─ Đầu ra: {colorize(normalized_display, Colors.GREEN)}")
 
-    # ========== PHASE 2: Trích xuất (Extract Potentials) ==========
-    p2 = extract_components(p1, province_known, district_known)
-    
-    p2_time = p2['processing_time_ms']
-    print(f"\n⏱ {colorize(f'{p2_time:5.1f}ms', Colors.YELLOW)} | {colorize('Phase 2: Trích xuất Components', Colors.BOLD)}")
+    # ========== PHASE 2: Structural Parsing (NEW) ==========
+    # Try to parse using separators and keywords first
+    province_normalized = normalize_hint(province_known) if province_known else None
+    district_normalized = normalize_hint(district_known) if district_known else None
 
-    # Explain the algorithm
-    print(f"  └─ {colorize('Thuật toán:', Colors.BOLD)} Hierarchical Scoped Search (tìm kiếm phân cấp)")
-    print(f"     ├─ Bước 1: Tạo N-grams từ văn bản (1-gram → 4-gram)")
-    print(f"     ├─ Bước 2: Match với 9,991 xã/phường trong database")
-    print(f"     ├─ Bước 3: Tính điểm dựa trên: vị trí, độ dài, fuzzy similarity")
-    print(f"     └─ Bước 4: Lọc và xếp hạng theo confidence score")
+    structural_result = structural_parse(
+        p1['normalized'],
+        province_known=province_normalized,
+        district_known=district_normalized
+    )
 
-    # Show N-gram generation stats
-    normalized = p1.get('normalized', '')
-    tokens = normalized.split()
-    total_ngrams = sum(max(0, len(tokens) - n + 1) for n in range(1, min(5, len(tokens) + 1)))
-    print(f"\n  {colorize('N-gram Generation:', Colors.BOLD)}")
-    print(f"     ├─ Số tokens: {colorize(str(len(tokens)), Colors.CYAN)}")
-    print(f"     ├─ Tổng n-grams sinh ra: {colorize(str(total_ngrams), Colors.YELLOW)} (1-4 grams)")
-    print(f"     └─ {colorize(' '.join([f'[{t}]' for t in tokens]), Colors.GREEN)}")
+    structural_confidence = structural_result['confidence']
+    structural_time = structural_result['processing_time_ms']
+
+    print(f"\n⏱ {colorize(f'{structural_time:5.1f}ms', Colors.YELLOW)} | {colorize('Phase 2: Structural Parsing', Colors.BOLD)}")
+    confidence_str = f"{structural_confidence:.2f}"
+    print(f"  └─ Method: {colorize(structural_result['method'], Colors.CYAN)} | Confidence: {colorize(confidence_str, score_color(structural_confidence * 100))}")
+
+    if structural_confidence >= 0.75:
+        print(f"  └─ {colorize('✓ High confidence structural parsing - using result', Colors.GREEN)}")
+        if structural_result.get('ward'):
+            print(f"     └─ Ward: {colorize(structural_result['ward'], Colors.GREEN_BOLD)}")
+        if structural_result.get('district'):
+            print(f"     └─ District: {colorize(structural_result['district'], Colors.GREEN)}")
+        if structural_result.get('province'):
+            print(f"     └─ Province: {colorize(structural_result['province'], Colors.CYAN)}")
+    else:
+        print(f"  └─ {colorize('⚠ Low confidence - will fallback to n-gram extraction', Colors.YELLOW)}")
+
+    # ========== PHASE 3: Trích xuất (Extract Potentials) ==========
+    # Decision: Use structural or n-gram?
+    if structural_confidence >= 0.75:
+        # Build phase3-like result from structural parsing
+        province_full, district_full, ward_full = lookup_full_names(
+            structural_result.get('province'),
+            structural_result.get('district'),
+            structural_result.get('ward')
+        )
+
+        p2 = {
+            'potential_provinces': [(structural_result['province'], 1.0, (-1, -1))] if structural_result.get('province') else [],
+            'potential_districts': [(structural_result['district'], 1.0, (-1, -1))] if structural_result.get('district') else [],
+            'potential_wards': [(structural_result['ward'], 1.0, (-1, -1))] if structural_result.get('ward') else [],
+            'potential_streets': [],
+            'processing_time_ms': 0,  # Already counted in structural_time
+            'source': 'structural'
+        }
+
+        print(f"\n⏱ {colorize(f'  0.0ms', Colors.YELLOW)} | {colorize('Phase 3: Skipped (using structural result)', Colors.BOLD)}")
+    else:
+        # Fallback to n-gram extraction
+        p2 = extract_components(p1, province_known, district_known)
+        p2_time = p2['processing_time_ms']
+        print(f"\n⏱ {colorize(f'{p2_time:5.1f}ms', Colors.YELLOW)} | {colorize('Phase 3: N-gram Extraction', Colors.BOLD)}")
+
+        # Explain the algorithm (only for n-gram extraction)
+        print(f"  └─ {colorize('Thuật toán:', Colors.BOLD)} Hierarchical Scoped Search (tìm kiếm phân cấp)")
+        print(f"     ├─ Bước 1: Tạo N-grams từ văn bản (1-gram → 4-gram)")
+        print(f"     ├─ Bước 2: Match với 9,991 xã/phường trong database")
+        print(f"     ├─ Bước 3: Tính điểm dựa trên: vị trí, độ dài, fuzzy similarity")
+        print(f"     └─ Bước 4: Lọc và xếp hạng theo confidence score")
+
+        # Show N-gram generation stats
+        normalized = p1.get('normalized', '')
+        tokens = normalized.split()
+        total_ngrams = sum(max(0, len(tokens) - n + 1) for n in range(1, min(5, len(tokens) + 1)))
+        print(f"\n  {colorize('N-gram Generation:', Colors.BOLD)}")
+        print(f"     ├─ Số tokens: {colorize(str(len(tokens)), Colors.CYAN)}")
+        print(f"     ├─ Tổng n-grams sinh ra: {colorize(str(total_ngrams), Colors.YELLOW)} (1-4 grams)")
+        print(f"     └─ {colorize(' '.join([f'[{t}]' for t in tokens]), Colors.GREEN)}")
 
     # Show known values first (if provided)
     if province_known or district_known:
@@ -627,7 +678,14 @@ def process_one_address(address_text, province_known=None, district_known=None):
 
     print(f"{'='*60}\n")
 
-    return {'phase1': p1, 'phase2': p2, 'phase3': p3, 'phase4': p4, 'phase5': p5}
+    return {
+        'phase1': p1,
+        'phase2_structural': structural_result,
+        'phase3_extraction': p2,
+        'phase4_candidates': p3,
+        'phase5_validation': p4,
+        'phase6_postprocessing': p5
+    }
 
 
 def normalize_ground_truth(value):
