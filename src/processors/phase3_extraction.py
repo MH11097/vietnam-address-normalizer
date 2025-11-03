@@ -19,21 +19,24 @@ logger = logging.getLogger(__name__)
 def extract_components(
     preprocessed: Dict[str, Any],
     province_known: Optional[str] = None,
-    district_known: Optional[str] = None
+    district_known: Optional[str] = None,
+    phase2_segments: list = None
 ) -> Dict[str, Any]:
     """
     Extract components and generate LOCAL candidates from database.
 
-    Phase 2 Responsibilities:
+    Phase 3 Responsibilities:
     1. Extract potentials from normalized text via n-gram matching
-    2. Generate all valid candidate combinations from potentials
-    3. Validate hierarchy for each candidate
-    4. Return ranked candidates ready for Phase 3 enrichment
+    2. Apply boost scores from Phase 2 (delimiter/keyword bonuses)
+    3. Generate all valid candidate combinations from potentials
+    4. Validate hierarchy for each candidate
+    5. Return ranked candidates ready for Phase 4
 
     Args:
         preprocessed: Output from Phase 1 preprocessing
         province_known: Known province from raw data (optional, trusted 100%)
         district_known: Known district from raw data (optional, trusted 100%)
+        phase2_segments: Segments with boost scores from Phase 2 (optional)
 
     Returns:
         Dictionary containing:
@@ -109,10 +112,14 @@ def extract_components(
 
     # Step 1: Extract potentials from database
     logger.debug(f"[PHASE 3] Step 1: Extracting potentials from database")
+    # Pass original text (before abbreviation expansion) for direct match bonus
+    original_text_for_matching = preprocessed.get('no_accent', preprocessed.get('unicode_normalized'))
     extraction_result = extract_with_database(
         normalized_text,
         province_known=prov_known_norm,
-        district_known=dist_known_norm
+        district_known=dist_known_norm,
+        original_text_for_matching=original_text_for_matching,
+        phase2_segments=phase2_segments or []
     )
     
     # Log extraction results

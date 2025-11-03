@@ -33,7 +33,9 @@ import time
 
 # Compiled regex patterns for performance
 WARD_KEYWORDS = re.compile(r'\b(xa|phuong|p\.|p(?=\s|$)|f\.|f(?=\s|$))\b', re.IGNORECASE)
-DISTRICT_KEYWORDS = re.compile(r'\b(quan|huyen|q\.|q(?=\s|$)|h\.|h(?=\s|$)|tx|thi\s*xa)\b', re.IGNORECASE)
+# Note: "tp" (thanh pho) can be district-level OR province-level depending on context
+# We include it in both patterns and rely on context resolution during parsing
+DISTRICT_KEYWORDS = re.compile(r'\b(quan|huyen|q\.|q(?=\s|$)|h\.|h(?=\s|$)|tx|thi\s*xa|thanh\s*pho|tp|t\.?p\.?)\b', re.IGNORECASE)
 PROVINCE_KEYWORDS = re.compile(r'\b(tinh|thanh\s*pho|tp|t\.?p\.?)\b', re.IGNORECASE)
 
 # Noise patterns (organizations, contacts) that indicate non-parsable address
@@ -69,12 +71,10 @@ def structural_parse(
 
     Returns:
         {
-            'method': 'comma_keyword' | 'keyword_only' | 'none',
-            'ward': str or None,
-            'district': str or None,
-            'province': str or None,
-            'confidence': float (0-1),
-            'segments': List[Dict] (for debugging),
+            'method': 'comma_keyword' | 'dash_keyword' | 'none',
+            'confidence': float (always 0 to trigger Phase 3),
+            'segments': List[Dict] with boost scores,
+            'has_structure': bool,
             'processing_time_ms': float
         }
 
@@ -82,11 +82,12 @@ def structural_parse(
         >>> structural_parse("xa yen ho, duc tho", province_known="ha tinh")
         {
             'method': 'comma_keyword',
-            'ward': 'yen ho',
-            'district': 'duc tho',
-            'province': 'ha tinh',
-            'confidence': 0.95,
-            'segments': [...]
+            'confidence': 0,
+            'segments': [
+                {'text': 'yen ho', 'keyword': 'xa', 'boost': 0.4},
+                {'text': 'duc tho', 'keyword': None, 'boost': 0.2}
+            ],
+            'has_structure': True
         }
     """
     start_time = time.time()
@@ -116,14 +117,18 @@ def structural_parse(
             result['processing_time_ms'] = (time.time() - start_time) * 1000
             return result
 
-    # Tier 2: Keyword-only parsing (medium confidence)
-    if has_keywords(normalized_address):
-        result = parse_keyword_only(normalized_address, province_known, district_known)
+    # Tier 1c: Underscore-separated parsing (treat like comma)
+    if '_' in normalized_address:
+        # Replace underscore with comma and reuse comma parser
+        normalized_underscore = normalized_address.replace('_', ',')
+        result = parse_comma_separated(normalized_underscore, province_known, district_known)
         if result['confidence'] > 0:
+            result['method'] = 'underscore_keyword'
             result['processing_time_ms'] = (time.time() - start_time) * 1000
             return result
 
-    # No structure found - return confidence=0 to trigger n-gram fallback
+    # No delimiter found - return confidence=0 to trigger n-gram fallback (Phase 3)
+    # Phase 3 will handle keyword-based extraction
     return _empty_result((time.time() - start_time) * 1000)
 
 
@@ -131,22 +136,11 @@ def _empty_result(processing_time_ms: float) -> Dict[str, Any]:
     """Return empty result indicating no structural parsing possible."""
     return {
         'method': 'none',
-        'ward': None,
-        'district': None,
-        'province': None,
         'confidence': 0,
         'segments': [],
+        'has_structure': False,
         'processing_time_ms': round(processing_time_ms, 3)
     }
-
-
-def has_keywords(address: str) -> bool:
-    """Check if address contains any administrative keywords."""
-    return bool(
-        WARD_KEYWORDS.search(address) or
-        DISTRICT_KEYWORDS.search(address) or
-        PROVINCE_KEYWORDS.search(address)
-    )
 
 
 # ============================================================================
@@ -159,22 +153,24 @@ def parse_comma_separated(
     district_known: Optional[str]
 ) -> Dict[str, Any]:
     """
-    Parse comma-separated address.
+    Parse comma-separated address into scored segments.
 
-    Strategy:
+    NEW Strategy (Scoring, not Decision):
     1. Split by comma into segments
     2. Extract keyword + name from each segment
-    3. Label segments (ward/district/province/unknown)
-    4. Resolve unknown segments using position heuristics
-    5. Calculate confidence based on completeness
+    3. Calculate boost score based on:
+       - Has keyword: +0.3
+       - Position (later segments = higher boost)
+       - Delimiter presence (comma/dash): +0.15 base
+    4. Return segments with scores for Phase 3 to validate with DB
 
     Example:
         "xa yen ho, duc tho" →
         segments = [
-            {'level': 'ward', 'name': 'yen ho', 'keyword': 'xa'},
-            {'level': 'unknown', 'name': 'duc tho', 'keyword': None}
+            {'text': 'yen ho', 'keyword': 'xa', 'position': 0, 'boost': 0.3},
+            {'text': 'duc tho', 'keyword': None, 'position': 1, 'boost': 0.15}
         ]
-        → resolve → district='duc tho'
+        → Phase 3 validates with DB and picks valid matches
 
     Args:
         address: Normalized address text
@@ -182,43 +178,48 @@ def parse_comma_separated(
         district_known: Known district (optional)
 
     Returns:
-        Parsed components with confidence score
+        Segments with boost scores (confidence always 0 to trigger Phase 3)
     """
 
     # Split by comma and clean
     segments = [s.strip() for s in address.split(',') if s.strip()]
 
     if not segments:
-        return {'method': 'none', 'confidence': 0}
+        return {'method': 'none', 'confidence': 0, 'segments': []}
 
-    # Parse each segment to extract level, name, keyword
-    parsed_segments = []
-    for seg in segments:
+    # Parse each segment to extract keyword and calculate boost
+    scored_segments = []
+    for idx, seg in enumerate(segments):
         level, name, keyword = extract_segment_info(seg)
-        parsed_segments.append({
-            'original': seg,
-            'level': level,      # 'ward' | 'district' | 'province' | 'unknown'
-            'name': name,
-            'keyword': keyword
+
+        # Skip empty or numeric-only segments
+        if not name or name.isdigit():
+            continue
+
+        # Calculate boost score
+        boost = 0.1  # Base delimiter bonus
+
+        # Keyword bonus
+        if keyword:
+            boost += 0.3
+
+        # Position bonus (later = higher, follows hierarchy)
+        position_bonus = (idx / max(len(segments) - 1, 1)) * 0.1
+        boost += position_bonus
+
+        scored_segments.append({
+            'text': name,
+            'keyword': keyword,
+            'keyword_level': level if level != 'unknown' else None,
+            'position': idx,
+            'boost': round(boost, 2)
         })
-
-    # Resolve hierarchy (infer unknown segments from context)
-    components = resolve_hierarchy(
-        parsed_segments,
-        province_known,
-        district_known
-    )
-
-    # Calculate confidence based on completeness and structure quality
-    confidence = calculate_confidence(parsed_segments, components, province_known, district_known)
 
     return {
         'method': 'comma_keyword',
-        'ward': components.get('ward'),
-        'district': components.get('district'),
-        'province': components.get('province'),
-        'confidence': confidence,
-        'segments': parsed_segments
+        'confidence': 0,  # Always 0 → Always run Phase 3 for DB validation
+        'segments': scored_segments,
+        'has_structure': True
     }
 
 
@@ -280,19 +281,25 @@ def extract_name_after_keyword(tokens: List[str], keyword: str) -> str:
     Strategy:
     - Find keyword position in tokens
     - Take next 1-3 tokens (84% of real names are 1-2 words)
+    - IMPORTANT: For abbreviated keywords (p, p., q, q., h, h., f, f.), limit to 2 tokens max
     - Stop at next keyword or end of tokens
+    - Validate against DB to prevent over-extraction
 
     Args:
         tokens: List of tokens in segment
-        keyword: The matched keyword (e.g., 'xa', 'huyen')
+        keyword: The matched keyword (e.g., 'xa', 'huyen', 'p', 'p.')
 
     Returns:
-        Extracted name (e.g., 'yen ho', 'duc tho')
+        Extracted name (e.g., 'yen ho', 'duc tho', 'nam ngan')
 
     Example:
         tokens = ['xa', 'yen', 'ho', 'huyen']
         keyword = 'xa'
         → returns 'yen ho' (stops at 'huyen')
+
+        tokens = ['p', 'nam', 'ngan', 'thanh', 'hoa']
+        keyword = 'p'
+        → returns 'nam ngan' (2 tokens max for abbreviated keyword, validated via DB)
     """
 
     kw_lower = keyword.lower()
@@ -314,9 +321,15 @@ def extract_name_after_keyword(tokens: List[str], keyword: str) -> str:
         # Keyword not found (shouldn't happen)
         return ''
 
-    # Extract next 1-3 tokens after keyword
+    # Determine max tokens based on keyword type
+    # Abbreviated keywords (p, p., q, q., h, h., f, f.) → max 2 tokens
+    # Full keywords (xa, phuong, quan, huyen) → max 3 tokens
+    abbreviated_keywords = {'p', 'p.', 'q', 'q.', 'h', 'h.', 'f', 'f.', 'tx', 't.p', 't.p.', 'tp'}
+    max_tokens = 2 if kw_lower in abbreviated_keywords else 3
+
+    # Extract next 1-max_tokens after keyword
     name_tokens = []
-    for i in range(kw_idx + 1, min(kw_idx + 4, len(tokens))):
+    for i in range(kw_idx + 1, min(kw_idx + max_tokens + 1, len(tokens))):
         tok = tokens[i]
 
         # Stop at next keyword
@@ -326,6 +339,26 @@ def extract_name_after_keyword(tokens: List[str], keyword: str) -> str:
             break
 
         name_tokens.append(tok)
+
+    # Try to validate and refine using DB
+    # Try from longest to shortest to find best match
+    if len(name_tokens) > 1:
+        from ..utils.db_utils import get_ward_set, get_district_set
+
+        # Determine which set to check based on keyword type
+        if WARD_KEYWORDS.match(kw_lower):
+            valid_set = get_ward_set()
+        elif DISTRICT_KEYWORDS.match(kw_lower):
+            valid_set = get_district_set()
+        else:
+            valid_set = None
+
+        if valid_set:
+            # Try longest match first, then progressively shorter
+            for length in range(len(name_tokens), 0, -1):
+                candidate = ' '.join(name_tokens[:length])
+                if candidate in valid_set:
+                    return candidate
 
     return ' '.join(name_tokens)
 
@@ -462,238 +495,6 @@ def calculate_confidence(
 
     # Cap at 0.95 (never 100% confident without validation)
     return min(max(confidence, 0.0), 0.95)
-
-
-# ============================================================================
-# TIER 2: KEYWORD-ONLY PARSER
-# ============================================================================
-
-def parse_keyword_only(
-    address: str,
-    province_known: Optional[str],
-    district_known: Optional[str]
-) -> Dict[str, Any]:
-    """
-    Parse address with keywords but no separators.
-
-    Strategy:
-    - Scan tokens for keywords
-    - Check if keyword is standalone (not part of compound name)
-    - Extract 1-3 tokens after each keyword
-    - Stop at next keyword
-
-    IMPORTANT: Handle ambiguous cases like "phuc xa ba dinh"
-    - "phuc xa" is a ward name (not "phuc" + keyword "xa")
-    - Need to check if keyword appears at position > 0 without preceding uppercase/special context
-
-    Example:
-        "xa yen ho huyen duc tho" → ward='yen ho', district='duc tho'
-        "phuc xa ba dinh" → ward='phuc xa', district='ba dinh' (NOT ward='ba dinh')
-
-    Args:
-        address: Normalized address
-        province_known: Known province
-        district_known: Known district
-
-    Returns:
-        Parsed components with confidence
-    """
-
-    tokens = address.lower().split()
-    components = {}
-    used_indices = set()  # Track which token indices have been consumed
-
-    i = 0
-    while i < len(tokens):
-        if i in used_indices:
-            i += 1
-            continue
-
-        tok = tokens[i]
-
-        # Check if current token is a standalone keyword
-        # HEURISTIC: If keyword appears after another token AND next token exists,
-        # check if this is compound name (e.g., "phuc xa") vs keyword
-        is_standalone_keyword = False
-
-        if WARD_KEYWORDS.match(tok) or DISTRICT_KEYWORDS.match(tok) or PROVINCE_KEYWORDS.match(tok):
-            # Check context: is this a standalone keyword or part of name?
-            if i == 0:
-                # First token → likely standalone keyword
-                is_standalone_keyword = True
-            elif i > 0 and i < len(tokens) - 1:
-                # Middle position → check if forms compound name
-                # Heuristic: If previous token + current tok exists in DB, it's a name
-                # For now: use simpler rule - keyword at position 1-2 in short address
-                # is likely part of name if followed by known admin term
-                prev_tok = tokens[i-1]
-                next_tok = tokens[i+1] if i+1 < len(tokens) else ''
-
-                # Check if next token is a known district/province name
-                from ..utils.db_utils import get_district_set, get_province_set
-                dist_set = get_district_set()
-                prov_set = get_province_set()
-
-                if next_tok in dist_set or next_tok in prov_set or (i+2 < len(tokens) and f"{next_tok} {tokens[i+2]}" in dist_set):
-                    # Next token is admin name → current 'xa'/'phuong' might be part of compound
-                    # Check: "phuc xa" where "xa" is suffix of ward name
-                    # If previous token exists, treat "prev + xa" as compound name
-                    if i == 1 and len(tokens) <= 4:  # Short address, keyword at position 1
-                        # Likely compound: "phuc xa" not "phuc" + keyword "xa"
-                        is_standalone_keyword = False
-                    else:
-                        is_standalone_keyword = True
-                else:
-                    # Standard case
-                    is_standalone_keyword = True
-            else:
-                is_standalone_keyword = True
-
-        if not is_standalone_keyword:
-            i += 1
-            continue
-
-        # Process standalone keyword
-        if WARD_KEYWORDS.match(tok):
-            name = extract_name_from_tokens(tokens[i+1:])
-            if name:
-                components['ward'] = name
-                # Mark tokens as used
-                used_indices.add(i)
-                for j in range(i+1, i+1+len(name.split())):
-                    used_indices.add(j)
-                i += len(name.split()) + 1
-            else:
-                i += 1
-
-        elif DISTRICT_KEYWORDS.match(tok):
-            name = extract_name_from_tokens(tokens[i+1:])
-            if name:
-                components['district'] = name
-                used_indices.add(i)
-                for j in range(i+1, i+1+len(name.split())):
-                    used_indices.add(j)
-                i += len(name.split()) + 1
-            else:
-                i += 1
-
-        elif PROVINCE_KEYWORDS.match(tok):
-            name = extract_name_from_tokens(tokens[i+1:])
-            if name:
-                components['province'] = name
-                used_indices.add(i)
-                for j in range(i+1, i+1+len(name.split())):
-                    used_indices.add(j)
-                i += len(name.split()) + 1
-            else:
-                i += 1
-
-        else:
-            i += 1
-
-    # Fallback: If nothing extracted, try n-gram approach
-    # For "phuc xa ba dinh" → check if "phuc xa" + "ba dinh" both exist in DB
-    if not components.get('ward') and not components.get('district'):
-        # Try to parse as "name1 name2" without keywords
-        components = _parse_no_keywords_fallback(tokens, province_known, district_known)
-
-    # Use known values if extracted values are missing
-    if province_known and not components.get('province'):
-        components['province'] = province_known
-    if district_known and not components.get('district'):
-        components['district'] = district_known
-
-    # Calculate confidence (lower than comma-separated)
-    confidence = 0.65  # Base
-    if components.get('ward'):
-        confidence += 0.1
-    if components.get('district'):
-        confidence += 0.1
-    if components.get('province'):
-        confidence += 0.05
-    if province_known or district_known:
-        confidence += 0.05
-
-    return {
-        'method': 'keyword_only',
-        'confidence': min(confidence, 0.85),  # Max 0.85 for keyword-only
-        'ward': components.get('ward'),
-        'district': components.get('district'),
-        'province': components.get('province'),
-        'segments': []  # No segments for keyword-only
-    }
-
-
-def _parse_no_keywords_fallback(
-    tokens: List[str],
-    province_known: Optional[str],
-    district_known: Optional[str]
-) -> Dict[str, str]:
-    """
-    Fallback parser for addresses with embedded keywords in names.
-
-    Example: "phuc xa ba dinh" where "phuc xa" is ward, "ba dinh" is district
-
-    Strategy:
-    - Try 2-word + 2-word split
-    - Try 2-word + 1-word split
-    - Validate against DB
-    """
-    from ..utils.db_utils import get_ward_set, get_district_set
-
-    ward_set = get_ward_set()
-    dist_set = get_district_set()
-
-    components = {}
-
-    # Try split: first 2 words = ward, last 2 words = district
-    if len(tokens) == 4:
-        candidate_ward = f"{tokens[0]} {tokens[1]}"
-        candidate_dist = f"{tokens[2]} {tokens[3]}"
-
-        if candidate_ward in ward_set and candidate_dist in dist_set:
-            components['ward'] = candidate_ward
-            components['district'] = candidate_dist
-            return components
-
-    # Try split: first 2 words = ward, last 1 word = district
-    if len(tokens) >= 3:
-        candidate_ward = f"{tokens[0]} {tokens[1]}"
-        candidate_dist = tokens[2]
-
-        if candidate_ward in ward_set and candidate_dist in dist_set:
-            components['ward'] = candidate_ward
-            components['district'] = candidate_dist
-            return components
-
-    return components
-
-
-def extract_name_from_tokens(tokens: List[str]) -> str:
-    """
-    Extract place name from tokens until next keyword (max 3 tokens).
-
-    IMPORTANT: Skip first token if it contains keyword as suffix
-    (e.g., "phuc xa" where "xa" is part of name, not keyword)
-
-    Args:
-        tokens: Remaining tokens after keyword
-
-    Returns:
-        Extracted name (1-3 words)
-    """
-    name_tokens = []
-    for i, tok in enumerate(tokens[:3]):  # Max 3 words (covers 84% of real names)
-        # Stop at next keyword (but only if it's a standalone keyword at token start)
-        # This prevents "xa" in "phuc xa" from being treated as keyword
-        if i > 0 and (  # Only check after first token
-            WARD_KEYWORDS.match(tok) or
-            DISTRICT_KEYWORDS.match(tok) or
-            PROVINCE_KEYWORDS.match(tok)):
-            break
-        name_tokens.append(tok)
-
-    return ' '.join(name_tokens)
 
 
 # ============================================================================

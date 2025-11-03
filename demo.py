@@ -9,6 +9,7 @@ Usage:
 import sys
 import argparse
 import logging
+from datetime import datetime
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -22,7 +23,7 @@ from src.processors.phase3_extraction import extract_components
 from src.processors.phase4_candidates import generate_candidates
 from src.processors.phase5_validation import validate_and_rank
 from src.processors.phase6_postprocessing import postprocess
-from src.utils.db_utils import query_all
+from src.utils.db_utils import query_all, save_user_rating
 from src.utils.text_utils import normalize_hint
 from src.utils.iterative_preprocessing import iterative_preprocess, should_use_iterative
 from src.utils.extraction_utils import lookup_full_names
@@ -196,7 +197,7 @@ def process_one_address(address_text, province_known=None, district_known=None):
     confidence_str = f"{structural_confidence:.2f}"
     print(f"  └─ Method: {colorize(structural_result['method'], Colors.CYAN)} | Confidence: {colorize(confidence_str, score_color(structural_confidence * 100))}")
 
-    if structural_confidence >= 0.75:
+    if structural_confidence >= 0.85:
         print(f"  └─ {colorize('✓ High confidence structural parsing - using result', Colors.GREEN)}")
         if structural_result.get('ward'):
             print(f"     └─ Ward: {colorize(structural_result['ward'], Colors.GREEN_BOLD)}")
@@ -209,21 +210,55 @@ def process_one_address(address_text, province_known=None, district_known=None):
 
     # ========== PHASE 3: Trích xuất (Extract Potentials) ==========
     # Decision: Use structural or n-gram?
-    if structural_confidence >= 0.75:
+    if structural_confidence >= 0.85:
         # Build phase3-like result from structural parsing
-        province_full, district_full, ward_full = lookup_full_names(
-            structural_result.get('province'),
-            structural_result.get('district'),
-            structural_result.get('ward')
-        )
+        province = structural_result.get('province')
+        district = structural_result.get('district')
+        ward = structural_result.get('ward')
+
+        province_full, district_full, ward_full = lookup_full_names(province, district, ward)
+
+        # Build candidate from structural result
+        # Only create candidate if DB lookup succeeded
+        candidate = None
+        if province_full and (not district or district_full) and (not ward or ward_full):
+            match_level = sum([1 if province else 0, 1 if district else 0, 1 if ward else 0])
+            candidate = {
+                'ward': ward,
+                'district': district,
+                'province': province,
+                'ward_full': ward_full,
+                'district_full': district_full,
+                'province_full': province_full,
+                'ward_score': 95 if ward else 0,
+                'district_score': 95 if district else 0,
+                'province_score': 100 if province else 0,
+                'confidence': structural_confidence,
+                'source': f"structural_{structural_result['method']}",
+                'hierarchy_valid': True,
+                'match_level': match_level,
+                'at_rule': match_level,
+                'match_type': 'exact',
+                'final_confidence': structural_confidence
+            }
 
         p2 = {
-            'potential_provinces': [(structural_result['province'], 1.0, (-1, -1))] if structural_result.get('province') else [],
-            'potential_districts': [(structural_result['district'], 1.0, (-1, -1))] if structural_result.get('district') else [],
-            'potential_wards': [(structural_result['ward'], 1.0, (-1, -1))] if structural_result.get('ward') else [],
+            'candidates': [candidate] if candidate else [],
+            'potential_provinces': [(province, 1.0, (-1, -1))] if province else [],
+            'potential_districts': [(district, 1.0, (-1, -1))] if district else [],
+            'potential_wards': [(ward, 1.0, (-1, -1))] if ward else [],
             'potential_streets': [],
             'processing_time_ms': 0,  # Already counted in structural_time
-            'source': 'structural'
+            'source': 'structural',
+            'normalized_text': p1.get('normalized', ''),
+            'geographic_known_used': province is not None,
+            'original_address': address_text,
+            'province': province,
+            'district': district,
+            'ward': ward,
+            'province_score': 100 if province else 0,
+            'district_score': 95 if district else 0,
+            'ward_score': 95 if ward else 0
         }
 
         print(f"\n⏱ {colorize(f'  0.0ms', Colors.YELLOW)} | {colorize('Phase 3: Skipped (using structural result)', Colors.BOLD)}")
@@ -986,6 +1021,88 @@ def debug_failed_extractions(limit=100, show_first=10):
     print(f"\n{'='*80}\n")
 
 
+def prompt_user_rating(result_data: dict) -> bool:
+    """
+    Hỏi người dùng đánh giá chất lượng kết quả và lưu vào database.
+
+    Args:
+        result_data: Dictionary chứa thông tin về kết quả parsing và các thông tin cần lưu
+            - cif_no: Customer ID (optional)
+            - original_address: Địa chỉ gốc
+            - known_province: Province hint from DB
+            - known_district: District hint from DB
+            - parsed_province: Extracted province
+            - parsed_district: Extracted district
+            - parsed_ward: Extracted ward
+            - confidence_score: Confidence score
+            - processing_time_ms: Total processing time
+            - match_type: Match type
+
+    Returns:
+        True if rating was saved, False if user skipped
+    """
+    print(f"\n{colorize('⭐ ĐÁNH GIÁ CHẤT LƯỢNG KẾT QUẢ', Colors.CYAN_BOLD)}")
+    print(f"{'─'*60}")
+    print(f"  {colorize('1', Colors.GREEN_BOLD)} = Tốt (kết quả chính xác)")
+    print(f"  {colorize('2', Colors.YELLOW_BOLD)} = Trung bình (gần đúng nhưng thiếu/sai một số thông tin)")
+    print(f"  {colorize('3', Colors.RED_BOLD)} = Kém (kết quả sai hoàn toàn)")
+    print(f"  {colorize('Enter', Colors.CYAN)} = Bỏ qua")
+    print(f"{'─'*60}")
+
+    while True:
+        try:
+            user_input = input(f"Nhập lựa chọn {colorize('(1/2/3)', Colors.YELLOW)} hoặc {colorize('Enter', Colors.CYAN)} để bỏ qua: ").strip()
+
+            # User skipped
+            if not user_input:
+                print(f"{colorize('⏭ Đã bỏ qua đánh giá', Colors.YELLOW)}\n")
+                return False
+
+            # Validate input
+            if user_input not in ['1', '2', '3']:
+                print(f"{colorize('❌ Lựa chọn không hợp lệ. Vui lòng nhập 1, 2, 3 hoặc Enter.', Colors.RED)}")
+                continue
+
+            # Valid rating
+            rating = int(user_input)
+
+            # Prepare data for database
+            rating_data = {
+                'timestamp': datetime.now().isoformat(),
+                'cif_no': result_data.get('cif_no'),
+                'original_address': result_data.get('original_address'),
+                'known_province': result_data.get('known_province'),
+                'known_district': result_data.get('known_district'),
+                'parsed_province': result_data.get('parsed_province'),
+                'parsed_district': result_data.get('parsed_district'),
+                'parsed_ward': result_data.get('parsed_ward'),
+                'confidence_score': result_data.get('confidence_score'),
+                'user_rating': rating,
+                'processing_time_ms': result_data.get('processing_time_ms'),
+                'match_type': result_data.get('match_type')
+            }
+
+            # Save to database
+            record_id = save_user_rating(rating_data)
+
+            # Show confirmation with color based on rating
+            rating_label = {
+                1: colorize('Tốt', Colors.GREEN_BOLD),
+                2: colorize('Trung bình', Colors.YELLOW_BOLD),
+                3: colorize('Kém', Colors.RED_BOLD)
+            }[rating]
+
+            print(f"{colorize('✅', Colors.GREEN)} Đã lưu đánh giá: {rating_label} (ID: {record_id})\n")
+            return True
+
+        except KeyboardInterrupt:
+            print(f"\n{colorize('⏭ Đã bỏ qua đánh giá', Colors.YELLOW)}\n")
+            return False
+        except Exception as e:
+            print(f"{colorize(f'❌ Lỗi khi lưu đánh giá: {e}', Colors.RED)}")
+            return False
+
+
 def main():
     """Hàm chính"""
     parser = argparse.ArgumentParser(description='Demo xử lý địa chỉ')
@@ -1038,6 +1155,31 @@ def main():
         result = process_one_address(args.address, args.province, args.district)
         print(f"\n{colorize('✅ Hoàn thành!', Colors.GREEN_BOLD)}\n")
 
+        # Hỏi đánh giá chất lượng
+        p5 = result.get('phase6_postprocessing', {})
+        best_match = result.get('phase5_validation', {}).get('best_match')
+
+        result_data = {
+            'cif_no': None,  # No CIF for single address mode
+            'original_address': args.address,
+            'known_province': args.province,
+            'known_district': args.district,
+            'parsed_province': best_match.get('province') if best_match else None,
+            'parsed_district': best_match.get('district') if best_match else None,
+            'parsed_ward': best_match.get('ward') if best_match else None,
+            'confidence_score': best_match.get('confidence') if best_match else None,
+            'processing_time_ms': sum([
+                result.get('phase1', {}).get('processing_time_ms', 0),
+                result.get('phase3_extraction', {}).get('processing_time_ms', 0),
+                result.get('phase4_candidates', {}).get('processing_time_ms', 0),
+                result.get('phase5_validation', {}).get('processing_time_ms', 0),
+                result.get('phase6_postprocessing', {}).get('processing_time_ms', 0)
+            ]),
+            'match_type': best_match.get('match_type') if best_match else None
+        }
+
+        prompt_user_rating(result_data)
+
     # CHẾ ĐỘ 2: Xử lý từ database
     else:
         print(f"\n{'='*60}")
@@ -1062,8 +1204,38 @@ def main():
                 sample.get('ten_quan_huyen_thuong_tru')
             )
 
-            if i < len(samples) and not args.auto:
-                input(f"\n{colorize('▶ Nhấn Enter để tiếp tục...', Colors.YELLOW)}")
+            # Hỏi đánh giá chất lượng (skip nếu có --auto flag)
+            if not args.auto:
+                p5 = result.get('phase6_postprocessing', {})
+                best_match = result.get('phase5_validation', {}).get('best_match')
+
+                result_data = {
+                    'cif_no': cif,
+                    'original_address': sample['dia_chi_thuong_tru'],
+                    'known_province': sample.get('ten_tinh_thuong_tru'),
+                    'known_district': sample.get('ten_quan_huyen_thuong_tru'),
+                    'parsed_province': best_match.get('province') if best_match else None,
+                    'parsed_district': best_match.get('district') if best_match else None,
+                    'parsed_ward': best_match.get('ward') if best_match else None,
+                    'confidence_score': best_match.get('confidence') if best_match else None,
+                    'processing_time_ms': sum([
+                        result.get('phase1', {}).get('processing_time_ms', 0),
+                        result.get('phase3_extraction', {}).get('processing_time_ms', 0),
+                        result.get('phase4_candidates', {}).get('processing_time_ms', 0),
+                        result.get('phase5_validation', {}).get('processing_time_ms', 0),
+                        result.get('phase6_postprocessing', {}).get('processing_time_ms', 0)
+                    ]),
+                    'match_type': best_match.get('match_type') if best_match else None
+                }
+
+                prompt_user_rating(result_data)
+
+                if i < len(samples):
+                    input(f"\n{colorize('▶ Nhấn Enter để tiếp tục...', Colors.YELLOW)}")
+            else:
+                # Auto mode - không hỏi rating
+                if i < len(samples):
+                    print()  # Empty line between records
 
         print(f"\n{colorize('✅ Đã xử lý xong tất cả mẫu!', Colors.GREEN_BOLD)}\n")
 

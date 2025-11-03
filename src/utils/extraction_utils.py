@@ -33,6 +33,14 @@ ADMIN_NOISE_WORDS = {
     'toa nha', 'cua hang', 'sieu thi', 'trung tam'
 }
 
+# Administrative keywords that mark boundaries between place names
+# Used to prevent greedy extraction (e.g., "quan 8 phuong 4" should be "8" and "4", not "8 phuong 4")
+ADMIN_KEYWORDS = {
+    'phuong', 'p', 'xa', 'x', 'thi', 'tran',
+    'quan', 'q', 'huyen', 'h',
+    'thanh', 'pho', 'tp', 'tx'
+}
+
 
 def lookup_full_names(
     province: Optional[str],
@@ -141,92 +149,148 @@ def extract_explicit_patterns(tokens: List[str]) -> Dict[str, List[Tuple[str, in
         # Pattern 1: THANH PHO / TP (city/district)
         if token in ['thanh', 'tp']:
             if token == 'thanh' and i + 1 < len(tokens) and tokens[i + 1] == 'pho':
-                # "THANH PHO X" → extract X (next 1-3 tokens)
+                # "THANH PHO X" → extract X
                 start_idx = i + 2
-                end_idx = min(i + 5, len(tokens))  # Max 3 tokens for name
-                if start_idx < len(tokens):
+                end_idx = start_idx
+
+                # Expand until we hit another admin keyword or max 3 tokens
+                while end_idx < len(tokens) and end_idx < start_idx + 3:
+                    if tokens[end_idx] in ADMIN_KEYWORDS:
+                        break
+                    end_idx += 1
+
+                if end_idx > start_idx:
                     name = ' '.join(tokens[start_idx:end_idx])
                     districts.append((name, start_idx, end_idx))
-                    i = end_idx
-                    continue
+                i = end_idx if end_idx > start_idx else i + 2
+                continue
             elif token == 'tp':
-                # "TP X" → extract X (next 1-3 tokens)
+                # "TP X" → extract X
                 start_idx = i + 1
-                end_idx = min(i + 4, len(tokens))  # Max 3 tokens for name
-                if start_idx < len(tokens):
+                end_idx = start_idx
+
+                # Expand until we hit another admin keyword or max 3 tokens
+                while end_idx < len(tokens) and end_idx < start_idx + 3:
+                    if tokens[end_idx] in ADMIN_KEYWORDS:
+                        break
+                    end_idx += 1
+
+                if end_idx > start_idx:
                     name = ' '.join(tokens[start_idx:end_idx])
                     districts.append((name, start_idx, end_idx))
-                    i = end_idx
-                    continue
+                i = end_idx if end_idx > start_idx else i + 1
+                continue
 
         # Pattern 2: THI XA / TX (town/district)
         if token in ['thi', 'tx']:
             if token == 'thi' and i + 1 < len(tokens) and tokens[i + 1] == 'xa':
                 # "THI XA X" → extract X
                 start_idx = i + 2
-                end_idx = min(i + 5, len(tokens))
-                if start_idx < len(tokens):
+                end_idx = start_idx
+
+                # Expand until we hit another admin keyword or max 3 tokens
+                while end_idx < len(tokens) and end_idx < start_idx + 3:
+                    if tokens[end_idx] in ADMIN_KEYWORDS:
+                        break
+                    end_idx += 1
+
+                if end_idx > start_idx:
                     name = ' '.join(tokens[start_idx:end_idx])
                     districts.append((name, start_idx, end_idx))
-                    i = end_idx
-                    continue
+                i = end_idx if end_idx > start_idx else i + 2
+                continue
             elif token == 'tx':
                 # "TX X" → extract X
                 start_idx = i + 1
-                end_idx = min(i + 4, len(tokens))
-                if start_idx < len(tokens):
+                end_idx = start_idx
+
+                # Expand until we hit another admin keyword or max 3 tokens
+                while end_idx < len(tokens) and end_idx < start_idx + 3:
+                    if tokens[end_idx] in ADMIN_KEYWORDS:
+                        break
+                    end_idx += 1
+
+                if end_idx > start_idx:
                     name = ' '.join(tokens[start_idx:end_idx])
                     districts.append((name, start_idx, end_idx))
-                    i = end_idx
-                    continue
+                i = end_idx if end_idx > start_idx else i + 1
+                continue
 
         # Pattern 3: HUYEN / H (district)
         if token in ['huyen', 'h']:
             if token == 'huyen' or (token == 'h' and i + 1 < len(tokens)):
                 # "HUYEN X" or "H X" → extract X
                 start_idx = i + 1
-                end_idx = min(i + 4, len(tokens))
-                if start_idx < len(tokens):
+                end_idx = start_idx
+
+                # Expand until we hit another admin keyword or max 3 tokens
+                while end_idx < len(tokens) and end_idx < start_idx + 3:
+                    if tokens[end_idx] in ADMIN_KEYWORDS:
+                        break
+                    end_idx += 1
+
+                if end_idx > start_idx:
                     name = ' '.join(tokens[start_idx:end_idx])
                     # Special case: Filter out noise words after HUYEN
                     if not has_noise_word(name, tokens, start_idx, end_idx):
                         districts.append((name, start_idx, end_idx))
-                    i = end_idx
-                    continue
+                i = end_idx if end_idx > start_idx else i + 1
+                continue
 
         # Pattern 4: QUAN / Q (district)
         if token in ['quan', 'q']:
             # "QUAN X" or "Q X" → extract X
             start_idx = i + 1
-            end_idx = min(i + 4, len(tokens))
-            if start_idx < len(tokens):
+            end_idx = start_idx
+
+            # Expand until we hit another admin keyword or max 3 tokens
+            while end_idx < len(tokens) and end_idx < start_idx + 3:
+                if tokens[end_idx] in ADMIN_KEYWORDS:
+                    break  # Stop at keyword boundary
+                end_idx += 1
+
+            if end_idx > start_idx:
                 name = ' '.join(tokens[start_idx:end_idx])
                 districts.append((name, start_idx, end_idx))
-                i = end_idx
-                continue
+            i = end_idx if end_idx > start_idx else i + 1
+            continue
 
         # Pattern 5: PHUONG / P (ward)
         if token in ['phuong', 'p']:
             # "PHUONG X" or "P X" → extract X
             start_idx = i + 1
-            end_idx = min(i + 4, len(tokens))
-            if start_idx < len(tokens):
+            end_idx = start_idx
+
+            # Expand until we hit another admin keyword or max 3 tokens
+            while end_idx < len(tokens) and end_idx < start_idx + 3:
+                if tokens[end_idx] in ADMIN_KEYWORDS:
+                    break  # Stop at keyword boundary
+                end_idx += 1
+
+            if end_idx > start_idx:
                 name = ' '.join(tokens[start_idx:end_idx])
                 wards.append((name, start_idx, end_idx))
-                i = end_idx
-                continue
+            i = end_idx if end_idx > start_idx else i + 1
+            continue
 
         # Pattern 6: XA / X (commune/ward)
         if token in ['xa', 'x']:
             if token == 'xa' or (token == 'x' and i + 1 < len(tokens)):
                 # "XA X" or "X X" → extract X
                 start_idx = i + 1
-                end_idx = min(i + 4, len(tokens))
-                if start_idx < len(tokens):
+                end_idx = start_idx
+
+                # Expand until we hit another admin keyword or max 3 tokens
+                while end_idx < len(tokens) and end_idx < start_idx + 3:
+                    if tokens[end_idx] in ADMIN_KEYWORDS:
+                        break
+                    end_idx += 1
+
+                if end_idx > start_idx:
                     name = ' '.join(tokens[start_idx:end_idx])
                     wards.append((name, start_idx, end_idx))
-                    i = end_idx
-                    continue
+                i = end_idx if end_idx > start_idx else i + 1
+                continue
 
         i += 1
 
@@ -535,7 +599,9 @@ def match_in_set(
 def extract_with_database(
     normalized_text: str,
     province_known: Optional[str] = None,
-    district_known: Optional[str] = None
+    district_known: Optional[str] = None,
+    original_text_for_matching: Optional[str] = None,
+    phase2_segments: list = None
 ) -> Dict:
     """
     Extract province/district/ward using hierarchical scoped search.
@@ -553,6 +619,8 @@ def extract_with_database(
         normalized_text: Normalized address text
         province_known: Known province from raw data (optional, trusted 100%)
         district_known: Known district from raw data (optional, trusted 100%)
+        original_text_for_matching: Original text before abbreviation expansion (for direct match bonus)
+        phase2_segments: Segments with boost scores from Phase 2 (optional)
 
     Returns:
         Dictionary with extracted components and metadata
@@ -591,7 +659,8 @@ def extract_with_database(
         tokens,
         province_known=province_known,
         district_known=district_known,
-        max_branches=5
+        max_branches=5,
+        phase2_segments=phase2_segments or []
     )
 
     if not candidates:
@@ -646,7 +715,9 @@ def extract_with_database(
         'potential_wards': potential_wards,
         'potential_streets': [],  # Not used in new algorithm
         # Add candidates with token positions for Phase 6
-        'candidates': candidates  # Includes normalized_tokens and token positions
+        'candidates': candidates,  # Includes normalized_tokens and token positions
+        # Add original text for direct match bonus scoring
+        'original_text_for_matching': original_text_for_matching
     }
 
     return result
@@ -866,6 +937,36 @@ def generate_candidate_combinations(
             completeness * 0.15 +
             (1.0 if hierarchy_valid else 0.0) * 0.05
         ) * order_bonus * adjacency_bonus
+
+        # NEW: Direct Text Match Bonus
+        # Give bonus to candidates whose district/ward appears in ORIGINAL text (before abbreviation expansion)
+        # This prevents false matches from abbreviation expansion (e.g., "TP" -> "Tan Phu" when "Go Vap" is correct)
+        original_text_for_match = extraction_result.get('original_text_for_matching', normalized_text)
+        direct_match_bonus = 1.0
+
+        # Check district match in original text (before expansion)
+        if dist and original_text_for_match:
+            # Normalize district for comparison (remove accents, lowercase)
+            from ..utils.text_utils import remove_vietnamese_accents
+            dist_normalized = remove_vietnamese_accents(dist.lower())
+            original_normalized = remove_vietnamese_accents(original_text_for_match.lower())
+
+            # Check if district name appears in original text
+            if dist_normalized in original_normalized:
+                direct_match_bonus *= 1.15  # +15% bonus for district in original text
+
+        # Check ward match in original text (before expansion)
+        if ward and original_text_for_match:
+            from ..utils.text_utils import remove_vietnamese_accents
+            ward_normalized = remove_vietnamese_accents(ward.lower())
+            original_normalized = remove_vietnamese_accents(original_text_for_match.lower())
+
+            # Check if ward name appears in original text
+            if ward_normalized in original_normalized:
+                direct_match_bonus *= 1.10  # +10% bonus for ward in original text
+
+        # Apply direct match bonus
+        combined_score *= direct_match_bonus
 
         # IMPROVED: Allow candidates with missing levels (e.g., province + district only)
         # Common in real-world addresses where ward/commune is not specified
@@ -1544,9 +1645,9 @@ def extract_district_scoped(
         start_idx = last_n_tokens[0][0]
         end_idx = last_n_tokens[-1][0] + 1
 
-        # Skip if numeric only
-        if ngram_text.isdigit():
-            continue
+        # Skip if long numeric (street numbers), but allow 1-2 digit numbers (districts/wards)
+        if ngram_text.isdigit() and len(ngram_text) > 2:
+            continue  # Skip "660", "123" but allow "8", "12"
 
         # Try abbreviation expansion first (with province context)
         from .text_utils import expand_abbreviations
@@ -1584,8 +1685,9 @@ def extract_district_scoped(
             start_idx = ngram_tokens_data[0][0]
             end_idx = ngram_tokens_data[-1][0] + 1
 
-            if ngram_text.isdigit():
-                continue
+            # Skip if long numeric (street numbers), but allow 1-2 digit numbers (districts/wards)
+            if ngram_text.isdigit() and len(ngram_text) > 2:
+                continue  # Skip "660", "123" but allow "8", "12"
 
             # Try abbreviation expansion
             expanded = expand_abbreviations(ngram_text, use_db=True, province_context=province_context)
@@ -1626,8 +1728,9 @@ def extract_district_scoped(
                 start_idx = ngram_tokens_data[0][0]
                 end_idx = ngram_tokens_data[-1][0] + 1
 
-                if ngram_text.isdigit():
-                    continue
+                # Skip if long numeric (street numbers), but allow 1-2 digit numbers (wards)
+                if ngram_text.isdigit() and len(ngram_text) > 2:
+                    continue  # Skip "660", "123" but allow "4", "12"
 
                 # Try ward match (higher threshold since it's a fallback)
                 match_results = match_in_set(
@@ -1911,7 +2014,8 @@ def build_search_tree(
     tokens: List[str],
     province_known: Optional[str] = None,
     district_known: Optional[str] = None,
-    max_branches: int = 5
+    max_branches: int = 5,
+    phase2_segments: list = None
 ) -> List[Dict]:
     """
     Build multi-branch search tree using hierarchical scoped search.
@@ -1929,6 +2033,7 @@ def build_search_tree(
         province_known: Known province value (optional)
         district_known: Known district value (optional)
         max_branches: Maximum number of final candidates to return (default: 5)
+        phase2_segments: Segments with boost scores from Phase 2 (optional)
 
     Returns:
         List of candidate dictionaries with province, district, ward, scores, and metadata
@@ -1950,6 +2055,19 @@ def build_search_tree(
     logger.debug("[🔍 DEBUG] [PHASE 2] HIERARCHICAL SEARCH")
     logger.debug(f"[🔍 DEBUG]   📥 Tokens: {tokens}")
     logger.debug(f"[🔍 DEBUG]   📝 Known: province={province_known or 'None'}, district={district_known or 'None'}")
+
+    # Build boost lookup map from Phase 2 segments
+    # Map: segment_text → boost_score
+    boost_map = {}
+    if phase2_segments:
+        for seg in phase2_segments:
+            text = seg.get('text', '')
+            boost = seg.get('boost', 0)
+            if text and boost > 0:
+                boost_map[text] = boost
+
+        if boost_map:
+            logger.debug(f"[🔍 DEBUG]   🎯 Phase 2 boost map: {boost_map}")
 
     all_candidates = []
 
@@ -2174,6 +2292,44 @@ def build_search_tree(
                     'ward_tokens': ward_token_pos,
                     'normalized_tokens': tokens
                 })
+
+    # Apply Phase 2 boost scores before sorting
+    if boost_map:
+        logger.debug("\n[🔍 DEBUG]   [BOOST] Applying Phase 2 delimiter/keyword boosts")
+        for cand in all_candidates:
+            boost_applied = 0.0
+
+            # Check district
+            district = cand.get('district')
+            if district and district in boost_map:
+                boost_value = boost_map[district]
+                cand['district_score'] = min(1.0, cand['district_score'] + boost_value)
+                boost_applied += boost_value
+                logger.debug(f"[🔍 DEBUG]      Boosted district '{district}' by +{boost_value:.2f}")
+
+            # Check ward
+            ward = cand.get('ward')
+            if ward and ward in boost_map:
+                boost_value = boost_map[ward]
+                cand['ward_score'] = min(1.0, cand['ward_score'] + boost_value)
+                boost_applied += boost_value
+                logger.debug(f"[🔍 DEBUG]      Boosted ward '{ward}' by +{boost_value:.2f}")
+
+            # Recalculate combined score if boost applied
+            if boost_applied > 0:
+                scores = [
+                    cand['province_score'],
+                    cand['district_score'],
+                    cand['ward_score']
+                ]
+                non_zero_scores = [s for s in scores if s > 0]
+                if non_zero_scores:
+                    base_score = sum(non_zero_scores) / len(non_zero_scores)
+                    # Apply weight based on match level
+                    weight = 1.0 if cand['match_level'] == 3 else 0.8 if cand['match_level'] == 2 else 0.4
+                    cand['combined_score'] = base_score * weight
+                    cand['confidence'] = cand['combined_score']
+                    logger.debug(f"[🔍 DEBUG]      → New combined_score: {cand['combined_score']:.3f}")
 
     # Sort by combined_score DESC
     all_candidates.sort(key=lambda x: x['combined_score'], reverse=True)

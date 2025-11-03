@@ -405,6 +405,14 @@ def find_exact_match(
         None  # Prevents random results
     """
     from ..config import DEBUG_SQL
+    from .text_utils import normalize_admin_number
+
+    # Normalize ward/district to remove leading zeros (e.g., "06" -> "6")
+    # This ensures consistency with database normalization
+    if district:
+        district = normalize_admin_number(district)
+    if ward:
+        ward = normalize_admin_number(ward)
 
     if DEBUG_SQL:
         logger.debug(f"[SQL] find_exact_match(province={province}, district={district}, ward={ward})")
@@ -860,6 +868,181 @@ def get_cache_stats() -> dict:
         'get_district_set': get_district_set.cache_info()._asdict(),
         'get_ward_set': get_ward_set.cache_info()._asdict(),
         'get_street_set': get_street_set.cache_info()._asdict(),
+    }
+
+
+def save_user_rating(rating_data: Dict[str, Any]) -> int:
+    """
+    Save or update user quality rating to the database.
+
+    If a record with the same (original_address, known_province, known_district)
+    already exists, it will be updated. Otherwise, a new record will be inserted.
+
+    Args:
+        rating_data: Dictionary with rating information.
+
+    Returns:
+        ID of the inserted or updated record.
+
+    Example:
+        >>> from datetime import datetime
+        >>> rating_data = {
+        ...     'timestamp': datetime.now().isoformat(),
+        ...     'original_address': 'NGO394 DOI CAN P.CONG VI BD HN',
+        ...     'known_province': 'ha noi',
+        ...     'known_district': 'ba dinh',
+        ...     'parsed_province': 'ha noi',
+        ...     'parsed_district': 'ba dinh',
+        ...     'parsed_ward': 'cong vi',
+        ...     'user_rating': 1,
+        ...     'confidence_score': 0.98  # New score
+        ... }
+        >>> record_id = save_user_rating(rating_data)
+        >>> print(f"Saved/Updated rating with ID: {record_id}")
+    """
+
+    # Normalize NULL values to empty strings for unique constraint
+    # This matches the COALESCE logic in the unique index
+    known_province = rating_data.get('known_province')
+    known_district = rating_data.get('known_district')
+    known_province = known_province if known_province else ''
+    known_district = known_district if known_district else ''
+
+    original_address = rating_data.get('original_address')
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+
+        # First, try to UPDATE existing record
+        # Use COALESCE to match both NULL and empty string values
+        update_query = """
+        UPDATE user_quality_ratings
+        SET timestamp = ?,
+            cif_no = ?,
+            parsed_province = ?,
+            parsed_district = ?,
+            parsed_ward = ?,
+            confidence_score = ?,
+            user_rating = ?,
+            processing_time_ms = ?,
+            match_type = ?
+        WHERE original_address = ?
+            AND COALESCE(known_province, '') = ?
+            AND COALESCE(known_district, '') = ?
+        """
+
+        update_params = (
+            rating_data.get('timestamp'),
+            rating_data.get('cif_no'),
+            rating_data.get('parsed_province'),
+            rating_data.get('parsed_district'),
+            rating_data.get('parsed_ward'),
+            rating_data.get('confidence_score'),
+            rating_data.get('user_rating'),
+            rating_data.get('processing_time_ms'),
+            rating_data.get('match_type'),
+            original_address,
+            known_province,
+            known_district
+        )
+
+        cursor.execute(update_query, update_params)
+
+        # If no rows were updated, INSERT new record
+        if cursor.rowcount == 0:
+            insert_query = """
+            INSERT INTO user_quality_ratings (
+                timestamp, cif_no, original_address, known_province, known_district,
+                parsed_province, parsed_district, parsed_ward, confidence_score,
+                user_rating, processing_time_ms, match_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+
+            insert_params = (
+                rating_data.get('timestamp'),
+                rating_data.get('cif_no'),
+                original_address,
+                known_province,
+                known_district,
+                rating_data.get('parsed_province'),
+                rating_data.get('parsed_district'),
+                rating_data.get('parsed_ward'),
+                rating_data.get('confidence_score'),
+                rating_data.get('user_rating'),
+                rating_data.get('processing_time_ms'),
+                rating_data.get('match_type')
+            )
+
+            cursor.execute(insert_query, insert_params)
+            return cursor.lastrowid
+        else:
+            # Return the ID of the updated record
+            cursor.execute(
+                "SELECT id FROM user_quality_ratings WHERE original_address = ? AND COALESCE(known_province, '') = ? AND COALESCE(known_district, '') = ?",
+                (original_address, known_province, known_district)
+            )
+            return cursor.fetchone()[0]
+
+
+def get_rating_stats() -> Dict[str, Any]:
+    """
+    Get statistics about user quality ratings.
+
+    Returns:
+        Dictionary with rating statistics including:
+        - total_ratings: Total number of ratings
+        - rating_distribution: Count by rating (1, 2, 3)
+        - avg_confidence_by_rating: Average confidence score per rating level
+
+    Example:
+        >>> stats = get_rating_stats()
+        >>> print(f"Total ratings: {stats['total_ratings']}")
+        >>> print(f"Good ratings: {stats['rating_distribution'].get(1, 0)}")
+    """
+    # Get total and distribution
+    query_dist = """
+    SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN user_rating = 1 THEN 1 ELSE 0 END) as rating_1,
+        SUM(CASE WHEN user_rating = 2 THEN 1 ELSE 0 END) as rating_2,
+        SUM(CASE WHEN user_rating = 3 THEN 1 ELSE 0 END) as rating_3
+    FROM user_quality_ratings
+    """
+
+    result = query_one(query_dist)
+
+    if not result or result['total'] == 0:
+        return {
+            'total_ratings': 0,
+            'rating_distribution': {1: 0, 2: 0, 3: 0},
+            'avg_confidence_by_rating': {1: 0, 2: 0, 3: 0}
+        }
+
+    # Get average confidence by rating
+    query_conf = """
+    SELECT
+        user_rating,
+        AVG(confidence_score) as avg_confidence
+    FROM user_quality_ratings
+    WHERE confidence_score IS NOT NULL
+    GROUP BY user_rating
+    """
+
+    conf_results = query_all(query_conf)
+    avg_conf_map = {row['user_rating']: row['avg_confidence'] for row in conf_results}
+
+    return {
+        'total_ratings': result['total'],
+        'rating_distribution': {
+            1: result['rating_1'],
+            2: result['rating_2'],
+            3: result['rating_3']
+        },
+        'avg_confidence_by_rating': {
+            1: avg_conf_map.get(1, 0),
+            2: avg_conf_map.get(2, 0),
+            3: avg_conf_map.get(3, 0)
+        }
     }
 
 

@@ -173,6 +173,18 @@ def expand_abbreviations(
         # Load abbreviations with full context (handles priority internally)
         db_abbr = _load_db_abbreviations(province_context, district_context)
 
+        # First, handle multi-word abbreviations (2-3 words)
+        # Sort by length descending to match longer phrases first
+        multi_word_abbr = {k: v for k, v in db_abbr.items() if ' ' in k}
+        single_word_abbr = {k: v for k, v in db_abbr.items() if ' ' not in k}
+
+        # Apply multi-word abbreviations first
+        for abbr, expansion in sorted(multi_word_abbr.items(), key=lambda x: -len(x[0])):
+            # Use word boundaries to avoid partial matches
+            pattern = r'\b' + re.escape(abbr) + r'\b'
+            result = re.sub(pattern, expansion, result, flags=re.IGNORECASE)
+
+        # Then apply single-word abbreviations
         words = result.split()
         expanded_words = []
 
@@ -181,8 +193,8 @@ def expand_abbreviations(
             clean_word = word.strip('.,;:!?')
 
             # Check if abbreviation exists in loaded dict
-            if clean_word in db_abbr:
-                expanded_words.append(db_abbr[clean_word])
+            if clean_word in single_word_abbr:
+                expanded_words.append(single_word_abbr[clean_word])
             else:
                 expanded_words.append(word)
 
@@ -226,7 +238,7 @@ def finalize_normalization(text: str, keep_separators: bool = False) -> str:
 
     Args:
         text: Text that has already been normalized (unicode, abbr expanded, accents removed)
-        keep_separators: If True, preserve commas for structural parsing
+        keep_separators: If True, still replace commas with spaces (legacy parameter kept for compatibility)
 
     Returns:
         Finalized normalized text
@@ -234,8 +246,8 @@ def finalize_normalization(text: str, keep_separators: bool = False) -> str:
     Example:
         >>> finalize_normalization("phuong dien bien, quan ba dinh")
         'phuong dien bien quan ba dinh'
-        >>> finalize_normalization("phuong dien bien, quan ba dinh", keep_separators=True)
-        'phuong dien bien, quan ba dinh'
+        >>> finalize_normalization("55 BE VAN DAN,P14,Q TAN BINH", keep_separators=True)
+        '55 be van dan p14 q tan binh'
     """
     if not text or not isinstance(text, str):
         return ""
@@ -244,10 +256,10 @@ def finalize_normalization(text: str, keep_separators: bool = False) -> str:
 
     # Remove special characters
     if keep_separators:
-        # Keep commas for structural parsing, replace hyphens with spaces
-        # Hyphens often separate address components but break n-gram matching
-        result = re.sub(r'-', ' ', result)  # Replace hyphens with spaces first
-        result = re.sub(r'[^\w\s,]', ' ', result)  # Keep commas only
+        # Replace commas and hyphens with spaces to avoid parsing issues
+        # Cases like "55,P14,Q" should become "55 P14 Q" for proper tokenization
+        result = re.sub(r'[,\-_]', ' ', result)  # Replace commas, hyphens, and underscores with spaces
+        result = re.sub(r'[^\w\s]', ' ', result)  # Remove all other special chars
     else:
         result = remove_special_chars(result, keep_spaces=True)
 
@@ -387,6 +399,43 @@ def strip_admin_prefixes(text: str) -> str:
         result = pattern.sub(replacement, result)
 
     return result.strip()
+
+
+@lru_cache(maxsize=5000)
+def normalize_admin_number(text: str) -> str:
+    """
+    Normalize administrative unit numbers by removing leading zeros.
+
+    This ensures consistency with database records which have leading zeros stripped.
+    Only normalizes pure numeric strings (1-2 digits), preserves text-based names.
+
+    Args:
+        text: Administrative unit name (e.g., "06", "08", "dien bien")
+
+    Returns:
+        Normalized name with leading zeros removed (e.g., "6", "8", "dien bien")
+
+    Example:
+        >>> normalize_admin_number("06")
+        '6'
+        >>> normalize_admin_number("08")
+        '8'
+        >>> normalize_admin_number("10")
+        '10'
+        >>> normalize_admin_number("dien bien")
+        'dien bien'
+        >>> normalize_admin_number(None)
+        None
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    # Only normalize if it's a pure numeric string with 1-2 digits
+    # This preserves text-based ward/district names
+    if text.isdigit() and 1 <= len(text) <= 2:
+        return str(int(text))  # Convert "06" -> 6 -> "6"
+
+    return text
 
 
 @lru_cache(maxsize=5000)

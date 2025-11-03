@@ -37,7 +37,37 @@ def _build_phase3_from_structural(phase2_result: Dict[str, Any], phase1_result: 
 
     province_full, district_full, ward_full = lookup_full_names(province, district, ward)
 
+    # Debug logging
+    from ..config import DEBUG_EXTRACTION
+    if DEBUG_EXTRACTION:
+        print(f"[🔍 DEBUG] _build_phase3_from_structural:")
+        print(f"  └─ Input: province={province}, district={district}, ward={ward}")
+        print(f"  └─ Lookup result: province_full={province_full}, district_full={district_full}, ward_full={ward_full}")
+
     # Build single candidate from structural result
+    # IMPORTANT: Only create candidate if DB lookup succeeded (all _full fields are non-empty)
+    if not province_full or (district and not district_full) or (ward and not ward_full):
+        # DB lookup failed - return empty candidates
+        if DEBUG_EXTRACTION:
+            print(f"  └─ ❌ DB lookup failed, returning 0 candidates")
+        return {
+            'candidates': [],
+            'processing_time_ms': phase2_result['processing_time_ms'],
+            'geographic_known_used': phase2_result.get('province') is not None,
+            'original_address': phase1_result.get('original', ''),
+            'potential_provinces': [],
+            'potential_districts': [],
+            'potential_wards': [],
+            'potential_streets': [],
+            'province': phase2_result.get('province'),
+            'district': phase2_result.get('district'),
+            'ward': phase2_result.get('ward'),
+            'province_score': 0,
+            'district_score': 0,
+            'ward_score': 0,
+            'normalized_text': phase1_result.get('normalized', '')
+        }
+
     match_level = sum([
         1 if province else 0,
         1 if district else 0,
@@ -141,7 +171,7 @@ class AddressPipeline:
             phase_results['phase1'] = phase1_result
 
             # Phase 2: Structural Parsing
-            # Try to parse using separators and keywords first
+            # Extract segments with boost scores from delimiters/keywords
             phase2_result = phase2_structural.structural_parse(
                 phase1_result['normalized'],
                 province_known=province_known,
@@ -149,20 +179,15 @@ class AddressPipeline:
             )
             phase_results['phase2'] = phase2_result
 
-            # Decision: Use structural result or fallback to n-gram?
-            if phase2_result['confidence'] >= 0.75:
-                # High confidence structural parsing → skip n-gram extraction
-                # Build Phase 3 result from structural parsing
-                phase3_result = _build_phase3_from_structural(phase2_result, phase1_result)
-                phase_results['phase3'] = phase3_result
-            else:
-                # Low confidence or no structure → use n-gram extraction
-                phase3_result = phase3_extraction.extract_components(
-                    phase1_result,
-                    province_known=province_known,
-                    district_known=district_known
-                )
-                phase_results['phase3'] = phase3_result
+            # Phase 3: Always run n-gram extraction with DB validation
+            # Pass Phase 2 segments to apply boost scores during matching
+            phase3_result = phase3_extraction.extract_components(
+                phase1_result,
+                province_known=province_known,
+                district_known=district_known,
+                phase2_segments=phase2_result.get('segments', [])
+            )
+            phase_results['phase3'] = phase3_result
 
             # Phase 4: Candidate Generation
             # Pass Phase 3 result directly (contains candidates list)
