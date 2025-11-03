@@ -295,13 +295,13 @@ function displayResult(result) {
                 <p class="mb-3">Kết quả có chính xác không? Đánh giá giúp chúng tôi cải thiện hệ thống:</p>
                 <div class="d-grid gap-2 d-md-flex justify-content-md-center" id="ratingButtons">
                     <button class="btn btn-success btn-lg rating-btn" data-rating="1" onclick="submitRating(1)">
-                        <i class="bi bi-emoji-smile-fill"></i> 1 - Tốt (Chính xác)
+                        <i class="bi bi-emoji-smile-fill"></i> 1 - Tốt (kết quả chính xác)
                     </button>
                     <button class="btn btn-warning btn-lg rating-btn" data-rating="2" onclick="submitRating(2)">
-                        <i class="bi bi-emoji-neutral-fill"></i> 2 - Trung bình (Cần cải thiện)
+                        <i class="bi bi-emoji-neutral-fill"></i> 2 - Trung bình (gần đúng nhưng thiếu/sai một số thông tin)
                     </button>
                     <button class="btn btn-danger btn-lg rating-btn" data-rating="3" onclick="submitRating(3)">
-                        <i class="bi bi-emoji-frown-fill"></i> 3 - Kém (Sai)
+                        <i class="bi bi-emoji-frown-fill"></i> 3 - Kém (kết quả sai hoàn toàn)
                     </button>
                 </div>
                 <div id="ratingFeedback" class="mt-3"></div>

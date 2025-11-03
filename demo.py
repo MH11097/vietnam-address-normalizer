@@ -1021,7 +1021,72 @@ def debug_failed_extractions(limit=100, show_first=10):
     print(f"\n{'='*80}\n")
 
 
-def prompt_user_rating(result_data: dict) -> bool:
+def generate_batch_rating_report(ratings_list):
+    """
+    Tạo báo cáo đánh giá độ chính xác sau khi chạy batch.
+
+    Args:
+        ratings_list: List các rating đã được người dùng chấm (1/2/3)
+                     Chỉ chứa các địa chỉ đã được rate (bỏ qua những địa chỉ skip)
+
+    Returns:
+        None (chỉ hiển thị báo cáo)
+    """
+    if not ratings_list:
+        print(f"\n{colorize('⚠️ Không có đánh giá nào được ghi nhận', Colors.YELLOW)}")
+        return
+
+    total = len(ratings_list)
+    rating_1_count = sum(1 for r in ratings_list if r == 1)
+    rating_2_count = sum(1 for r in ratings_list if r == 2)
+    rating_3_count = sum(1 for r in ratings_list if r == 3)
+
+    # Tính phần trăm
+    rating_1_pct = (rating_1_count / total * 100) if total > 0 else 0
+    rating_2_pct = (rating_2_count / total * 100) if total > 0 else 0
+    rating_3_pct = (rating_3_count / total * 100) if total > 0 else 0
+
+    # Độ chính xác = % rating 1
+    accuracy = rating_1_pct
+
+    # Hiển thị báo cáo
+    print(f"\n{'═'*60}")
+    print(f"║{colorize('   BÁO CÁO ĐÁNH GIÁ BATCH', Colors.CYAN_BOLD).center(68)}║")
+    print(f"{'═'*60}")
+    print(f"║ {colorize('Tổng số địa chỉ đã chấm điểm:', Colors.BOLD)} {str(total).ljust(27)}║")
+    print(f"║{' '*58}║")
+
+    # Rating 1 (Tốt)
+    bar_1 = '█' * int(rating_1_pct / 2)  # Max 50 chars for 100%
+    rating_1_line = f"║ {colorize('✓ Rating 1 (Tốt):', Colors.GREEN_BOLD)} {str(rating_1_count).rjust(3)} ({rating_1_pct:5.1f}%)"
+    print(f"{rating_1_line.ljust(68)}║")
+    if rating_1_count > 0:
+        print(f"║   {colorize(bar_1, Colors.GREEN)}{' ' * (50 - len(bar_1))}║")
+
+    # Rating 2 (Trung bình)
+    bar_2 = '█' * int(rating_2_pct / 2)
+    rating_2_line = f"║ {colorize('○ Rating 2 (Trung bình):', Colors.YELLOW_BOLD)} {str(rating_2_count).rjust(3)} ({rating_2_pct:5.1f}%)"
+    print(f"{rating_2_line.ljust(68)}║")
+    if rating_2_count > 0:
+        print(f"║   {colorize(bar_2, Colors.YELLOW)}{' ' * (50 - len(bar_2))}║")
+
+    # Rating 3 (Kém)
+    bar_3 = '█' * int(rating_3_pct / 2)
+    rating_3_line = f"║ {colorize('✗ Rating 3 (Kém):', Colors.RED_BOLD)} {str(rating_3_count).rjust(3)} ({rating_3_pct:5.1f}%)"
+    print(f"{rating_3_line.ljust(68)}║")
+    if rating_3_count > 0:
+        print(f"║   {colorize(bar_3, Colors.RED)}{' ' * (50 - len(bar_3))}║")
+
+    print(f"║{' '*58}║")
+
+    # Độ chính xác tổng thể
+    accuracy_color = Colors.GREEN if accuracy >= 80 else (Colors.YELLOW if accuracy >= 60 else Colors.RED)
+    accuracy_line = f"║ {colorize('📊 Độ chính xác:', Colors.BOLD)} {colorize(f'{accuracy:.1f}%', accuracy_color)}"
+    print(f"{accuracy_line.ljust(68)}║")
+    print(f"{'═'*60}\n")
+
+
+def prompt_user_rating(result_data: dict):
     """
     Hỏi người dùng đánh giá chất lượng kết quả và lưu vào database.
 
@@ -1039,7 +1104,7 @@ def prompt_user_rating(result_data: dict) -> bool:
             - match_type: Match type
 
     Returns:
-        True if rating was saved, False if user skipped
+        int (1/2/3) if rating was saved, None if user skipped
     """
     print(f"\n{colorize('⭐ ĐÁNH GIÁ CHẤT LƯỢNG KẾT QUẢ', Colors.CYAN_BOLD)}")
     print(f"{'─'*60}")
@@ -1056,7 +1121,7 @@ def prompt_user_rating(result_data: dict) -> bool:
             # User skipped
             if not user_input:
                 print(f"{colorize('⏭ Đã bỏ qua đánh giá', Colors.YELLOW)}\n")
-                return False
+                return None
 
             # Validate input
             if user_input not in ['1', '2', '3']:
@@ -1093,14 +1158,14 @@ def prompt_user_rating(result_data: dict) -> bool:
             }[rating]
 
             print(f"{colorize('✅', Colors.GREEN)} Đã lưu đánh giá: {rating_label} (ID: {record_id})\n")
-            return True
+            return rating
 
         except KeyboardInterrupt:
             print(f"\n{colorize('⏭ Đã bỏ qua đánh giá', Colors.YELLOW)}\n")
-            return False
+            return None
         except Exception as e:
             print(f"{colorize(f'❌ Lỗi khi lưu đánh giá: {e}', Colors.RED)}")
-            return False
+            return None
 
 
 def main():
@@ -1194,6 +1259,9 @@ def main():
 
         print(f"✅ Đã tải {len(samples)} bản ghi\n")
 
+        # Track ratings for batch report
+        batch_ratings = []
+
         for i, sample in enumerate(samples, 1):
             cif = sample['cif_no']
             print(f"{colorize(f'MẪU {i}/{len(samples)} - CIF: {cif}', Colors.CYAN_BOLD)}")
@@ -1228,7 +1296,11 @@ def main():
                     'match_type': best_match.get('match_type') if best_match else None
                 }
 
-                prompt_user_rating(result_data)
+                rating = prompt_user_rating(result_data)
+
+                # Track rating if provided (not None)
+                if rating is not None:
+                    batch_ratings.append(rating)
 
                 if i < len(samples):
                     input(f"\n{colorize('▶ Nhấn Enter để tiếp tục...', Colors.YELLOW)}")
@@ -1238,6 +1310,10 @@ def main():
                     print()  # Empty line between records
 
         print(f"\n{colorize('✅ Đã xử lý xong tất cả mẫu!', Colors.GREEN_BOLD)}\n")
+
+        # Show batch rating report (only if not in auto mode and there are ratings)
+        if not args.auto and batch_ratings:
+            generate_batch_rating_report(batch_ratings)
 
 
 if __name__ == "__main__":
