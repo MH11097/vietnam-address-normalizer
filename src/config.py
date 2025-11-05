@@ -17,11 +17,13 @@ HELPER_FILE = DATA_DIR / 'merge_file3.csv'
 HELPER_MANUAL_FILE = DATA_DIR / 'merged_file_manual3.csv'
 ABBREVIATIONS_FILE = DATA_DIR / 'tenVietTat.csv'
 
-# Fuzzy matching thresholds (Very strict - 95%+ for all levels)
+# Fuzzy matching thresholds (Updated: 85% for balanced approach)
+# Lowered from 88% to 85% to handle spacing issues like "co nhue1" → "co nhue 1"
+# Combined with 50/50 weight balance (Token Sort / Levenshtein)
 FUZZY_THRESHOLDS = {
-    'province': 95,
-    'district': 95,
-    'ward': 95
+    'province': 85,
+    'district': 85,
+    'ward': 85
 }
 
 # Confidence thresholds for quality flags
@@ -65,11 +67,22 @@ HIERARCHY_INVALID_PENALTY = 0.8  # 20% penalty for invalid hierarchy
 # Position-based scoring settings
 POSITION_PENALTY_FACTOR = 0.2  # 20% max penalty for tokens far from end (0.8x-1.0x)
 
-# Ensemble scoring weights
+# Keyword context scoring for numeric administrative divisions
+# When numbers appear standalone (e.g., "1") vs with keywords (e.g., "phuong 1")
+NUMERIC_WITHOUT_KEYWORD_PENALTY = 0.7  # 30% penalty (0.7x score) for standalone 1-2 digit numbers
+NUMERIC_WITH_KEYWORD_BONUS = 1.2       # 20% bonus (1.2x score) for numbers with preceding keywords
+
+# Full administrative keywords (no abbreviations per user preference)
+ADMIN_KEYWORDS_FULL = {'phuong', 'xa', 'quan', 'huyen', 'thanh', 'thi', 'tran', 'pho'}
+
+# Ensemble scoring weights (Simplified: 100% Levenshtein)
+# Token Sort removed - Vietnamese addresses have fixed order, not needed
+# Jaccard removed - penalizes hierarchical addresses
+# Using pure Levenshtein for best typo & spacing handling
 ENSEMBLE_WEIGHTS = {
-    'token_sort': 0.5,
-    'levenshtein': 0.3,
-    'jaccard': 0.2
+    'levenshtein': 1.0    # 100% Levenshtein (simplest, fastest, most effective)
+    # 'token_sort': removed (not needed for Vietnamese addresses)
+    # 'jaccard': removed (caused false negatives)
 }
 
 # Scoring component weights (Phase 4)

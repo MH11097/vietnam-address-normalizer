@@ -5,6 +5,13 @@
 // Global state
 let isRandomMode = false;
 let selectedRating = null;
+let sessionStats = {
+    total: 0,
+    rating_1: 0,
+    rating_2: 0,
+    rating_3: 0,
+    accuracy: 0.0
+};
 
 // DOM Elements
 const parseForm = document.getElementById('parseForm');
@@ -14,6 +21,10 @@ const resultSection = document.getElementById('resultSection');
 // Event Listeners
 parseForm.addEventListener('submit', handleParse);
 loadRandomBtn.addEventListener('click', handleLoadRandom);
+
+// Province/District dropdowns event listeners
+document.getElementById('province').addEventListener('change', handleManualProvinceChange);
+document.getElementById('randomProvince').addEventListener('change', handleRandomProvinceChange);
 
 // Tab change listeners
 document.getElementById('manual-tab').addEventListener('click', () => {
@@ -142,7 +153,20 @@ async function handleParse(e) {
  */
 async function handleLoadRandom() {
     try {
-        const response = await fetch('/random');
+        // Get filter values from random tab
+        const selectedProvince = document.getElementById('randomProvince').value;
+
+        // Build query parameters
+        let url = '/random';
+        const params = new URLSearchParams();
+        if (selectedProvince) {
+            params.append('province', selectedProvince);
+        }
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+
+        const response = await fetch(url);
         const result = await response.json();
 
         if (result.success) {
@@ -154,8 +178,27 @@ async function handleLoadRandom() {
 
             // Fill form với data từ database
             document.getElementById('address').value = data.address;
-            document.getElementById('province').value = data.province || '';
-            document.getElementById('district').value = data.district || '';
+
+            // Set province dropdown to the value from DB
+            const provinceSelect = document.getElementById('province');
+            if (data.province) {
+                provinceSelect.value = data.province;
+                // Load districts for this province
+                await loadDistricts(data.province, 'district');
+            } else {
+                provinceSelect.value = '';
+            }
+
+            // Set district dropdown to the value from DB
+            const districtSelect = document.getElementById('district');
+            if (data.district) {
+                // Wait a bit for districts to load
+                setTimeout(() => {
+                    districtSelect.value = data.district;
+                }, 100);
+            } else {
+                districtSelect.value = '';
+            }
 
             // Fill known values display (after section is visible)
             const knownProvince = document.getElementById('knownProvince');
@@ -182,6 +225,9 @@ async function handleLoadRandom() {
 
             // Auto parse immediately
             await parseAddress(data.address, data.province || '', data.district || '');
+
+            // Load session stats after loading random (session auto-starts in backend)
+            await loadSessionStats();
 
         } else {
             alert('Lỗi: ' + result.error);
@@ -466,7 +512,7 @@ function renderPotentials(label, potentials) {
     if (!potentials || potentials.length === 0) return '';
 
     let html = `<h6>${label}:</h6><ul class="list-group mb-3">`;
-    potentials.forEach(([name, score, pos]) => {
+    potentials.forEach(([name, score]) => {
         html += `<li class="list-group-item d-flex justify-content-between align-items-center">
             ${escapeHtml(name)}
             <span class="badge bg-primary rounded-pill">${score.toFixed(3)}</span>
@@ -536,6 +582,129 @@ function escapeHtml(text) {
 }
 
 /**
+ * Update session stats display
+ */
+function updateSessionStatsDisplay(stats) {
+    if (!stats) return;
+
+    sessionStats = stats;
+    const statsBody = document.getElementById('sessionStatsBody');
+
+    // Calculate percentages
+    const pct1 = stats.total > 0 ? (stats.rating_1 / stats.total * 100).toFixed(1) : 0;
+    const pct2 = stats.total > 0 ? (stats.rating_2 / stats.total * 100).toFixed(1) : 0;
+    const pct3 = stats.total > 0 ? (stats.rating_3 / stats.total * 100).toFixed(1) : 0;
+
+    statsBody.innerHTML = `
+        <div class="text-center mb-3">
+            <h4 class="mb-0">${stats.total}</h4>
+            <small class="text-muted">Total Reviews</small>
+        </div>
+
+        <div class="mb-2">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="badge bg-success">1 - Tốt</span>
+                <strong>${stats.rating_1}</strong>
+            </div>
+            <div class="progress" style="height: 8px;">
+                <div class="progress-bar bg-success" role="progressbar"
+                     style="width: ${pct1}%"></div>
+            </div>
+            <small class="text-muted">${pct1}%</small>
+        </div>
+
+        <div class="mb-2">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="badge bg-warning">2 - TB</span>
+                <strong>${stats.rating_2}</strong>
+            </div>
+            <div class="progress" style="height: 8px;">
+                <div class="progress-bar bg-warning" role="progressbar"
+                     style="width: ${pct2}%"></div>
+            </div>
+            <small class="text-muted">${pct2}%</small>
+        </div>
+
+        <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="badge bg-danger">3 - Kém</span>
+                <strong>${stats.rating_3}</strong>
+            </div>
+            <div class="progress" style="height: 8px;">
+                <div class="progress-bar bg-danger" role="progressbar"
+                     style="width: ${pct3}%"></div>
+            </div>
+            <small class="text-muted">${pct3}%</small>
+        </div>
+
+        <hr>
+
+        <div class="text-center">
+            <h5 class="mb-0 text-primary">${stats.accuracy.toFixed(1)}%</h5>
+            <small class="text-muted">Accuracy Rate</small>
+            <p class="small text-muted mb-0 mt-1">(Rating 1+2)</p>
+        </div>
+
+        <div class="d-grid gap-2 mt-3">
+            <button class="btn btn-sm btn-outline-secondary" onclick="endSession()">
+                <i class="bi bi-stop-circle"></i> End Session
+            </button>
+        </div>
+    `;
+}
+
+/**
+ * Fetch session stats from server
+ */
+async function loadSessionStats() {
+    try {
+        const response = await fetch('/session_stats');
+        const result = await response.json();
+
+        if (result.success && result.stats) {
+            updateSessionStatsDisplay(result.stats);
+        }
+    } catch (error) {
+        console.error('Failed to load session stats:', error);
+    }
+}
+
+/**
+ * End current session
+ */
+async function endSession() {
+    if (!confirm('Bạn có chắc muốn kết thúc session hiện tại?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/end_session', { method: 'POST' });
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`Session đã kết thúc!\n\nThống kê cuối:\n- Tổng: ${result.summary.total}\n- Rating 1: ${result.summary.rating_1}\n- Rating 2: ${result.summary.rating_2}\n- Rating 3: ${result.summary.rating_3}\n- Accuracy: ${result.summary.accuracy.toFixed(1)}%`);
+
+            // Reset display
+            const statsBody = document.getElementById('sessionStatsBody');
+            statsBody.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-hourglass-split" style="font-size: 2rem;"></i>
+                    <p class="small mb-0 mt-2">Chưa có session</p>
+                </div>
+            `;
+
+            // Reset state
+            sessionStats = { total: 0, rating_1: 0, rating_2: 0, rating_3: 0, accuracy: 0 };
+        } else {
+            alert('Lỗi: ' + result.error);
+        }
+    } catch (error) {
+        console.error('Failed to end session:', error);
+        alert('Có lỗi xảy ra khi kết thúc session');
+    }
+}
+
+/**
  * Submit user rating
  */
 async function submitRating(rating) {
@@ -575,6 +744,11 @@ async function submitRating(rating) {
         // Silently submit without showing success message
         if (!result.success) {
             console.error('Failed to submit rating:', result.error);
+        } else {
+            // Update session stats display if returned
+            if (result.session_stats) {
+                updateSessionStatsDisplay(result.session_stats);
+            }
         }
 
     } catch (error) {
@@ -613,4 +787,581 @@ async function handleSendReviewAndNext() {
             await handleLoadRandom();
         }
     }
+}
+
+/**
+ * Load provinces from server and populate both dropdowns
+ */
+async function loadProvinces() {
+    try {
+        const response = await fetch('/provinces');
+        const result = await response.json();
+
+        if (result.success) {
+            const provinces = result.provinces;
+
+            // Populate manual entry province dropdown
+            const provinceSelect = document.getElementById('province');
+            provinceSelect.innerHTML = '<option value="">-- Chọn tỉnh/thành phố --</option>';
+            provinces.forEach(province => {
+                const option = document.createElement('option');
+                option.value = province;
+                option.textContent = province;
+                provinceSelect.appendChild(option);
+            });
+
+            // Populate random tab province dropdown
+            const randomProvinceSelect = document.getElementById('randomProvince');
+            randomProvinceSelect.innerHTML = '<option value="">-- Tất cả tỉnh/thành phố --</option>';
+            provinces.forEach(province => {
+                const option = document.createElement('option');
+                option.value = province;
+                option.textContent = province;
+                randomProvinceSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load provinces:', error);
+    }
+}
+
+/**
+ * Load districts from server based on selected province
+ */
+async function loadDistricts(province, targetSelectId) {
+    try {
+        const url = province ? `/districts?province=${encodeURIComponent(province)}` : '/districts';
+        const response = await fetch(url);
+        const result = await response.json();
+
+        if (result.success) {
+            const districts = result.districts;
+            const districtSelect = document.getElementById(targetSelectId);
+
+            // Clear and repopulate
+            const isRandomTab = targetSelectId === 'randomDistrict';
+            const defaultText = isRandomTab ? '-- Tất cả quận/huyện --' : '-- Chọn quận/huyện --';
+            districtSelect.innerHTML = `<option value="">${defaultText}</option>`;
+
+            districts.forEach(district => {
+                const option = document.createElement('option');
+                option.value = district;
+                option.textContent = district;
+                districtSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load districts:', error);
+    }
+}
+
+/**
+ * Handle province change in manual entry tab
+ */
+async function handleManualProvinceChange(e) {
+    const selectedProvince = e.target.value;
+    await loadDistricts(selectedProvince, 'district');
+}
+
+/**
+ * Handle province change in random tab
+ */
+async function handleRandomProvinceChange(e) {
+    const selectedProvince = e.target.value;
+    await loadDistricts(selectedProvince, 'randomDistrict');
+
+    // Update button text
+    updateRandomButtonText();
+}
+
+/**
+ * Update random button text based on selected filters
+ */
+function updateRandomButtonText() {
+    const province = document.getElementById('randomProvince').value;
+    const district = document.getElementById('randomDistrict').value;
+    const btnText = document.getElementById('loadRandomBtnText');
+
+    if (province && district) {
+        btnText.textContent = `Load Random từ ${district}`;
+    } else if (province) {
+        btnText.textContent = `Load Random từ ${province}`;
+    } else {
+        btnText.textContent = 'Load Random Sample';
+    }
+}
+
+// Initialize provinces on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadProvinces();
+
+    // Add event listener for random district change to update button text
+    document.getElementById('randomDistrict').addEventListener('change', updateRandomButtonText);
+
+    // Initialize review tab listeners
+    initializeReviewTab();
+});
+
+// ============================================================================
+// REVIEW TAB FUNCTIONALITY
+// ============================================================================
+
+let reviewState = {
+    currentFilter: 'all',
+    currentOffset: 0,
+    currentLimit: 20,  // Reduced from 50 to 20 for faster loading
+    totalRecords: 0,
+    records: []
+};
+
+/**
+ * Initialize review tab event listeners
+ */
+function initializeReviewTab() {
+    // Tab change to review
+    const reviewTab = document.getElementById('review-tab');
+    if (reviewTab) {
+        reviewTab.addEventListener('click', handleReviewTabClick);
+    }
+
+    // Load records button
+    const loadReviewBtn = document.getElementById('loadReviewBtn');
+    if (loadReviewBtn) {
+        loadReviewBtn.addEventListener('click', handleLoadReviewRecords);
+    }
+
+    // Pagination buttons
+    const prevBtn = document.getElementById('reviewPrevBtn');
+    const nextBtn = document.getElementById('reviewNextBtn');
+    if (prevBtn) prevBtn.addEventListener('click', handleReviewPrev);
+    if (nextBtn) nextBtn.addEventListener('click', handleReviewNext);
+
+    // Hide review section when switching to other tabs
+    document.getElementById('manual-tab').addEventListener('click', () => {
+        document.getElementById('resultSection').style.display = 'block';
+        document.getElementById('reviewRecordsSection').style.display = 'none';
+    });
+
+    document.getElementById('random-tab').addEventListener('click', () => {
+        document.getElementById('resultSection').style.display = 'block';
+        document.getElementById('reviewRecordsSection').style.display = 'none';
+    });
+}
+
+/**
+ * Handle review tab click
+ */
+function handleReviewTabClick() {
+    // Show review section, hide result section
+    document.getElementById('resultSection').style.display = 'none';
+    document.getElementById('reviewRecordsSection').style.display = 'block';
+}
+
+/**
+ * Load review statistics
+ */
+async function loadReviewStatistics() {
+    try {
+        const response = await fetch('/get_review_stats');
+        const data = await response.json();
+
+        if (data.success) {
+            const stats = data.stats;
+            const statsSection = document.getElementById('reviewStatsSection');
+            const statsContent = document.getElementById('reviewStatsContent');
+
+            // Build stats HTML
+            const total = stats.total_records;
+            const counts = stats.rating_counts;
+            const percentages = stats.rating_percentages;
+
+            let html = `
+                <div class="row g-2">
+                    <div class="col-6">
+                        <strong>Total:</strong> ${total}
+                    </div>
+                    <div class="col-6">
+                        <strong>⚪ Unreviewed:</strong> ${counts[0]} (${percentages[0].toFixed(1)}%)
+                    </div>
+                    <div class="col-6">
+                        <strong>🟢 Good:</strong> ${counts[1]} (${percentages[1].toFixed(1)}%)
+                    </div>
+                    <div class="col-6">
+                        <strong>🟡 Medium:</strong> ${counts[2]} (${percentages[2].toFixed(1)}%)
+                    </div>
+                    <div class="col-6">
+                        <strong>🔴 Poor:</strong> ${counts[3]} (${percentages[3].toFixed(1)}%)
+                    </div>
+                </div>
+            `;
+
+            statsContent.innerHTML = html;
+            statsSection.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Failed to load review statistics:', error);
+    }
+}
+
+/**
+ * Handle load review records
+ */
+async function handleLoadReviewRecords() {
+    const ratingFilter = document.getElementById('reviewRatingFilter').value;
+    const loadBtn = document.getElementById('loadReviewBtn');
+    const btnText = document.getElementById('loadReviewBtnText');
+
+    // Update button state
+    loadBtn.disabled = true;
+    btnText.textContent = 'Loading...';
+
+    try {
+        // Reset pagination
+        reviewState.currentFilter = ratingFilter;
+        reviewState.currentOffset = 0;
+
+        await loadReviewRecordsPage();
+
+    } catch (error) {
+        console.error('Failed to load review records:', error);
+        alert('Không thể load records. Vui lòng thử lại!');
+    } finally {
+        loadBtn.disabled = false;
+        btnText.textContent = 'Load Records';
+    }
+}
+
+/**
+ * Load review records page
+ */
+async function loadReviewRecordsPage() {
+    const url = `/get_review_records?user_rating=${reviewState.currentFilter}&limit=${reviewState.currentLimit}&offset=${reviewState.currentOffset}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!data.success) {
+        throw new Error(data.error || 'Failed to load records');
+    }
+
+    reviewState.records = data.records;
+    reviewState.totalRecords = data.pagination.total;
+
+    // Render records
+    renderReviewRecords(data.records);
+
+    // Update pagination
+    updateReviewPagination(data.pagination);
+}
+
+/**
+ * Render review records
+ */
+function renderReviewRecords(records) {
+    const recordsList = document.getElementById('reviewRecordsList');
+    const recordCount = document.getElementById('reviewRecordCount');
+
+    recordCount.textContent = reviewState.totalRecords;
+
+    if (records.length === 0) {
+        recordsList.innerHTML = `
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                <p class="mt-3">Không có records nào</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    records.forEach(record => {
+        html += renderReviewRecord(record);
+    });
+
+    recordsList.innerHTML = html;
+
+    // Attach event listeners to rating buttons
+    attachRatingButtonListeners();
+}
+
+/**
+ * Render single review record
+ */
+function renderReviewRecord(record) {
+    const ratingLabels = {
+        0: '⚪ Chưa review',
+        1: '🟢 Tốt',
+        2: '🟡 Trung bình',
+        3: '🔴 Kém'
+    };
+
+    const ratingColors = {
+        0: 'secondary',
+        1: 'success',
+        2: 'warning',
+        3: 'danger'
+    };
+
+    const currentRating = record.user_rating;
+    const currentLabel = ratingLabels[currentRating];
+    const currentColor = ratingColors[currentRating];
+
+    const confidence = (record.confidence_score * 100).toFixed(1);
+    const confidenceColor = confidence >= 80 ? 'success' : (confidence >= 50 ? 'warning' : 'danger');
+
+    // Get full names with diacritics (fallback to normalized if not available)
+    const wardFull = record.parsed_ward_full || record.parsed_ward || '____';
+    const districtFull = record.parsed_district_full || record.parsed_district || '____';
+    const provinceFull = record.parsed_province_full || record.parsed_province || '____';
+
+    return `
+        <div class="review-record border-bottom p-3" data-record-id="${record.id}">
+            <!-- Header -->
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="small text-muted">
+                    <strong>ID:</strong> ${record.id} |
+                    ${new Date(record.timestamp).toLocaleString('vi-VN')}
+                </div>
+                <span class="badge bg-${currentColor}">${currentLabel}</span>
+            </div>
+
+            <!-- Result Card (similar to other tabs) -->
+            <div class="card shadow-sm mb-3">
+                <div class="card-body p-3">
+                    <!-- INPUT Row -->
+                    <div class="row mb-2">
+                        <div class="col-12">
+                            <div class="d-flex align-items-start gap-2 flex-wrap">
+                                <strong style="min-width: 70px;">INPUT:</strong>
+                                <span class="flex-shrink-0">${escapeHtml(record.original_address)}</span>
+                                <span class="text-muted">|</span>
+                                <span class="badge bg-warning text-dark">____</span>
+                                <span class="text-muted">|</span>
+                                <span class="badge bg-success">${record.known_district || '____'}</span>
+                                <span class="text-muted">|</span>
+                                <span class="badge bg-primary">${record.known_province || '____'}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- OUTPUT Row -->
+                    <div class="row mb-2">
+                        <div class="col-12">
+                            <div class="d-flex align-items-start gap-2 flex-wrap">
+                                <strong style="min-width: 70px;">OUTPUT:</strong>
+                                <span class="flex-shrink-0">____</span>
+                                <span class="text-muted">|</span>
+                                <span class="badge bg-warning text-dark">${escapeHtml(wardFull)}</span>
+                                <span class="text-muted">|</span>
+                                <span class="badge bg-success">${escapeHtml(districtFull)}</span>
+                                <span class="text-muted">|</span>
+                                <span class="badge bg-primary">${escapeHtml(provinceFull)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-2">
+
+                    <!-- Metadata -->
+                    <div class="row small">
+                        <div class="col-4">
+                            <strong>Time:</strong> ${record.processing_time_ms?.toFixed(1) || '?'}ms
+                        </div>
+                        <div class="col-4">
+                            <strong>Confidence:</strong> <span class="badge bg-${confidenceColor}">${confidence}%</span>
+                        </div>
+                        <div class="col-4">
+                            <strong>Type:</strong> <span class="badge bg-secondary">${record.match_type || 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rating Buttons -->
+            <div class="mb-2">
+                <strong class="small">Đánh giá kết quả:</strong>
+            </div>
+            <div class="btn-group btn-group-sm w-100" role="group">
+                <button type="button" class="btn ${currentRating === 0 ? 'btn-secondary' : 'btn-outline-secondary'} rating-btn" data-rating="0" ${currentRating === 0 ? 'disabled' : ''}>
+                    ⚪ (0)
+                </button>
+                <button type="button" class="btn ${currentRating === 1 ? 'btn-success' : 'btn-outline-success'} rating-btn" data-rating="1" ${currentRating === 1 ? 'disabled' : ''}>
+                    🟢 Tốt (1)
+                </button>
+                <button type="button" class="btn ${currentRating === 2 ? 'btn-warning' : 'btn-outline-warning'} rating-btn" data-rating="2" ${currentRating === 2 ? 'disabled' : ''}>
+                    🟡 TB (2)
+                </button>
+                <button type="button" class="btn ${currentRating === 3 ? 'btn-danger' : 'btn-outline-danger'} rating-btn" data-rating="3" ${currentRating === 3 ? 'disabled' : ''}>
+                    🔴 Kém (3)
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Attach rating button listeners
+ */
+function attachRatingButtonListeners() {
+    const ratingButtons = document.querySelectorAll('.rating-btn');
+    ratingButtons.forEach(btn => {
+        btn.addEventListener('click', handleRatingButtonClick);
+    });
+}
+
+/**
+ * Handle rating button click
+ */
+async function handleRatingButtonClick(e) {
+    const button = e.target;
+    const newRating = parseInt(button.dataset.rating);
+    const recordDiv = button.closest('.review-record');
+    const recordId = parseInt(recordDiv.dataset.recordId);
+
+    // Disable all buttons in this record
+    const allButtons = recordDiv.querySelectorAll('.rating-btn');
+    allButtons.forEach(btn => btn.disabled = true);
+
+    try {
+        const response = await fetch('/update_rating', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                record_id: recordId,
+                new_rating: newRating
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Update the record's badge without reloading all records
+            updateRecordBadge(recordDiv, newRating);
+
+            // Re-enable buttons (set new current rating as disabled)
+            allButtons.forEach(btn => {
+                btn.disabled = (parseInt(btn.dataset.rating) === newRating);
+            });
+
+            // Show success feedback
+            showRatingSuccessToast(newRating);
+        } else {
+            throw new Error(data.error || 'Failed to update rating');
+        }
+    } catch (error) {
+        console.error('Failed to update rating:', error);
+        alert('Không thể cập nhật rating. Vui lòng thử lại!');
+
+        // Re-enable buttons
+        allButtons.forEach(btn => btn.disabled = false);
+    }
+}
+
+/**
+ * Update record badge and button styles after rating change
+ */
+function updateRecordBadge(recordDiv, newRating) {
+    const ratingLabels = {
+        0: '⚪ Chưa review',
+        1: '🟢 Tốt',
+        2: '🟡 Trung bình',
+        3: '🔴 Kém'
+    };
+
+    const ratingColors = {
+        0: 'secondary',
+        1: 'success',
+        2: 'warning',
+        3: 'danger'
+    };
+
+    // Update badge
+    const badge = recordDiv.querySelector('.badge');
+    if (badge) {
+        badge.className = `badge bg-${ratingColors[newRating]}`;
+        badge.textContent = ratingLabels[newRating];
+    }
+
+    // Update button styles: selected = solid, others = outline
+    const allButtons = recordDiv.querySelectorAll('.rating-btn');
+    allButtons.forEach(btn => {
+        const btnRating = parseInt(btn.dataset.rating);
+        const color = ratingColors[btnRating];
+
+        if (btnRating === newRating) {
+            // Selected button: solid color
+            btn.className = `btn btn-${color} rating-btn`;
+        } else {
+            // Other buttons: outline
+            btn.className = `btn btn-outline-${color} rating-btn`;
+        }
+    });
+}
+
+/**
+ * Show success toast after rating
+ */
+function showRatingSuccessToast(rating) {
+    const ratingLabels = {
+        0: 'Unreviewed',
+        1: 'Tốt',
+        2: 'Trung bình',
+        3: 'Kém'
+    };
+
+    // Simple toast notification (you can use Bootstrap toast if preferred)
+    const toast = document.createElement('div');
+    toast.className = 'alert alert-success position-fixed top-0 end-0 m-3';
+    toast.style.zIndex = '9999';
+    toast.innerHTML = `<i class="bi bi-check-circle-fill"></i> Đã cập nhật rating: ${ratingLabels[rating]}`;
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        toast.remove();
+    }, 2000);
+}
+
+/**
+ * Update review pagination
+ */
+function updateReviewPagination(pagination) {
+    const paginationSection = document.getElementById('reviewPaginationSection');
+    const paginationInfo = document.getElementById('reviewPaginationInfo');
+    const prevBtn = document.getElementById('reviewPrevBtn');
+    const nextBtn = document.getElementById('reviewNextBtn');
+
+    if (pagination.total === 0) {
+        paginationSection.style.display = 'none';
+        return;
+    }
+
+    paginationSection.style.display = 'block';
+
+    const start = pagination.offset + 1;
+    const end = Math.min(pagination.offset + pagination.limit, pagination.total);
+    paginationInfo.textContent = `${start} - ${end} of ${pagination.total}`;
+
+    // Update button states
+    prevBtn.disabled = pagination.offset === 0;
+    nextBtn.disabled = !pagination.has_more;
+}
+
+/**
+ * Handle previous page
+ */
+async function handleReviewPrev() {
+    if (reviewState.currentOffset >= reviewState.currentLimit) {
+        reviewState.currentOffset -= reviewState.currentLimit;
+        await loadReviewRecordsPage();
+    }
+}
+
+/**
+ * Handle next page
+ */
+async function handleReviewNext() {
+    reviewState.currentOffset += reviewState.currentLimit;
+    await loadReviewRecordsPage();
 }

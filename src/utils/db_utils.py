@@ -5,6 +5,7 @@ Provides connection management, query helpers, and data loading.
 import sqlite3
 import time
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
@@ -925,7 +926,8 @@ def save_user_rating(rating_data: Dict[str, Any]) -> int:
             confidence_score = ?,
             user_rating = ?,
             processing_time_ms = ?,
-            match_type = ?
+            match_type = ?,
+            session_id = ?
         WHERE original_address = ?
             AND COALESCE(known_province, '') = ?
             AND COALESCE(known_district, '') = ?
@@ -941,6 +943,7 @@ def save_user_rating(rating_data: Dict[str, Any]) -> int:
             rating_data.get('user_rating'),
             rating_data.get('processing_time_ms'),
             rating_data.get('match_type'),
+            rating_data.get('session_id'),
             original_address,
             known_province,
             known_district
@@ -954,8 +957,8 @@ def save_user_rating(rating_data: Dict[str, Any]) -> int:
             INSERT INTO user_quality_ratings (
                 timestamp, cif_no, original_address, known_province, known_district,
                 parsed_province, parsed_district, parsed_ward, confidence_score,
-                user_rating, processing_time_ms, match_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                user_rating, processing_time_ms, match_type, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
             insert_params = (
@@ -970,7 +973,8 @@ def save_user_rating(rating_data: Dict[str, Any]) -> int:
                 rating_data.get('confidence_score'),
                 rating_data.get('user_rating'),
                 rating_data.get('processing_time_ms'),
-                rating_data.get('match_type')
+                rating_data.get('match_type'),
+                rating_data.get('session_id')
             )
 
             cursor.execute(insert_query, insert_params)
@@ -991,7 +995,7 @@ def get_rating_stats() -> Dict[str, Any]:
     Returns:
         Dictionary with rating statistics including:
         - total_ratings: Total number of ratings
-        - rating_distribution: Count by rating (1, 2, 3)
+        - rating_distribution: Count by rating (0, 1, 2, 3)
         - avg_confidence_by_rating: Average confidence score per rating level
 
     Example:
@@ -1003,6 +1007,7 @@ def get_rating_stats() -> Dict[str, Any]:
     query_dist = """
     SELECT
         COUNT(*) as total,
+        SUM(CASE WHEN user_rating = 0 THEN 1 ELSE 0 END) as rating_0,
         SUM(CASE WHEN user_rating = 1 THEN 1 ELSE 0 END) as rating_1,
         SUM(CASE WHEN user_rating = 2 THEN 1 ELSE 0 END) as rating_2,
         SUM(CASE WHEN user_rating = 3 THEN 1 ELSE 0 END) as rating_3
@@ -1014,8 +1019,8 @@ def get_rating_stats() -> Dict[str, Any]:
     if not result or result['total'] == 0:
         return {
             'total_ratings': 0,
-            'rating_distribution': {1: 0, 2: 0, 3: 0},
-            'avg_confidence_by_rating': {1: 0, 2: 0, 3: 0}
+            'rating_distribution': {0: 0, 1: 0, 2: 0, 3: 0},
+            'avg_confidence_by_rating': {0: 0, 1: 0, 2: 0, 3: 0}
         }
 
     # Get average confidence by rating
@@ -1034,14 +1039,197 @@ def get_rating_stats() -> Dict[str, Any]:
     return {
         'total_ratings': result['total'],
         'rating_distribution': {
+            0: result['rating_0'],
             1: result['rating_1'],
             2: result['rating_2'],
             3: result['rating_3']
         },
         'avg_confidence_by_rating': {
+            0: avg_conf_map.get(0, 0),
             1: avg_conf_map.get(1, 0),
             2: avg_conf_map.get(2, 0),
             3: avg_conf_map.get(3, 0)
+        }
+    }
+
+
+def get_review_records(user_rating_filter: Optional[int] = None, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+    """
+    Get records from user_quality_ratings for review.
+
+    Args:
+        user_rating_filter: Filter by rating (0, 1, 2, 3). None = all ratings.
+        limit: Maximum number of records to return
+        offset: Number of records to skip (for pagination)
+
+    Returns:
+        List of rating records
+
+    Example:
+        >>> # Get first 50 unreviewed records (rating=0)
+        >>> records = get_review_records(user_rating_filter=0, limit=50, offset=0)
+        >>> len(records)
+        50
+        >>> records[0]['user_rating']
+        0
+    """
+    if user_rating_filter is not None:
+        query = """
+        SELECT
+            r.id, r.timestamp, r.cif_no, r.original_address,
+            r.known_province, r.known_district,
+            r.parsed_province, r.parsed_district, r.parsed_ward,
+            r.confidence_score, r.user_rating, r.processing_time_ms, r.match_type, r.session_id,
+            -- Get full names using subqueries (admin_divisions only has ward-level records)
+            COALESCE(
+                (SELECT province_full FROM admin_divisions
+                 WHERE province_name_normalized = r.parsed_province LIMIT 1),
+                r.parsed_province
+            ) as parsed_province_full,
+            COALESCE(
+                (SELECT district_full FROM admin_divisions
+                 WHERE province_name_normalized = r.parsed_province
+                 AND district_name_normalized = r.parsed_district LIMIT 1),
+                r.parsed_district
+            ) as parsed_district_full,
+            COALESCE(
+                (SELECT ward_full FROM admin_divisions
+                 WHERE province_name_normalized = r.parsed_province
+                 AND district_name_normalized = r.parsed_district
+                 AND ward_name_normalized = r.parsed_ward LIMIT 1),
+                r.parsed_ward
+            ) as parsed_ward_full
+        FROM user_quality_ratings r
+        WHERE r.user_rating = ?
+        ORDER BY r.timestamp DESC
+        LIMIT ? OFFSET ?
+        """
+        return query_all(query, (user_rating_filter, limit, offset))
+    else:
+        query = """
+        SELECT
+            r.id, r.timestamp, r.cif_no, r.original_address,
+            r.known_province, r.known_district,
+            r.parsed_province, r.parsed_district, r.parsed_ward,
+            r.confidence_score, r.user_rating, r.processing_time_ms, r.match_type, r.session_id,
+            -- Get full names using subqueries (admin_divisions only has ward-level records)
+            COALESCE(
+                (SELECT province_full FROM admin_divisions
+                 WHERE province_name_normalized = r.parsed_province LIMIT 1),
+                r.parsed_province
+            ) as parsed_province_full,
+            COALESCE(
+                (SELECT district_full FROM admin_divisions
+                 WHERE province_name_normalized = r.parsed_province
+                 AND district_name_normalized = r.parsed_district LIMIT 1),
+                r.parsed_district
+            ) as parsed_district_full,
+            COALESCE(
+                (SELECT ward_full FROM admin_divisions
+                 WHERE province_name_normalized = r.parsed_province
+                 AND district_name_normalized = r.parsed_district
+                 AND ward_name_normalized = r.parsed_ward LIMIT 1),
+                r.parsed_ward
+            ) as parsed_ward_full
+        FROM user_quality_ratings r
+        ORDER BY r.timestamp DESC
+        LIMIT ? OFFSET ?
+        """
+        return query_all(query, (limit, offset))
+
+
+def update_existing_rating(record_id: int, new_rating: int) -> bool:
+    """
+    Update the rating of an existing record.
+
+    Args:
+        record_id: ID of the record to update
+        new_rating: New rating value (0, 1, 2, 3)
+
+    Returns:
+        True if update successful, False otherwise
+
+    Example:
+        >>> # Update record #123 from rating=0 to rating=1
+        >>> success = update_existing_rating(123, 1)
+        >>> success
+        True
+    """
+    if new_rating not in (0, 1, 2, 3):
+        raise ValueError(f"Invalid rating: {new_rating}. Must be 0, 1, 2, or 3.")
+
+    query = """
+    UPDATE user_quality_ratings
+    SET user_rating = ?,
+        timestamp = ?
+    WHERE id = ?
+    """
+
+    rows_affected = execute_query(query, (new_rating, datetime.now().isoformat(), record_id))
+    return rows_affected > 0
+
+
+def get_review_statistics() -> Dict[str, Any]:
+    """
+    Get detailed review statistics by rating category.
+
+    Returns:
+        Dictionary with counts and percentages for each rating (0, 1, 2, 3)
+
+    Example:
+        >>> stats = get_review_statistics()
+        >>> stats['total_records']
+        1000
+        >>> stats['rating_counts'][0]  # Unreviewed count
+        250
+        >>> stats['rating_percentages'][1]  # Good percentage
+        35.5
+    """
+    query = """
+    SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN user_rating = 0 THEN 1 ELSE 0 END) as rating_0,
+        SUM(CASE WHEN user_rating = 1 THEN 1 ELSE 0 END) as rating_1,
+        SUM(CASE WHEN user_rating = 2 THEN 1 ELSE 0 END) as rating_2,
+        SUM(CASE WHEN user_rating = 3 THEN 1 ELSE 0 END) as rating_3,
+        AVG(CASE WHEN user_rating = 0 THEN confidence_score END) as avg_conf_0,
+        AVG(CASE WHEN user_rating = 1 THEN confidence_score END) as avg_conf_1,
+        AVG(CASE WHEN user_rating = 2 THEN confidence_score END) as avg_conf_2,
+        AVG(CASE WHEN user_rating = 3 THEN confidence_score END) as avg_conf_3
+    FROM user_quality_ratings
+    """
+
+    result = query_one(query)
+
+    if not result or result['total'] == 0:
+        return {
+            'total_records': 0,
+            'rating_counts': {0: 0, 1: 0, 2: 0, 3: 0},
+            'rating_percentages': {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0},
+            'avg_confidence': {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
+        }
+
+    total = result['total']
+
+    return {
+        'total_records': total,
+        'rating_counts': {
+            0: result['rating_0'] or 0,
+            1: result['rating_1'] or 0,
+            2: result['rating_2'] or 0,
+            3: result['rating_3'] or 0
+        },
+        'rating_percentages': {
+            0: (result['rating_0'] or 0) / total * 100 if total > 0 else 0.0,
+            1: (result['rating_1'] or 0) / total * 100 if total > 0 else 0.0,
+            2: (result['rating_2'] or 0) / total * 100 if total > 0 else 0.0,
+            3: (result['rating_3'] or 0) / total * 100 if total > 0 else 0.0
+        },
+        'avg_confidence': {
+            0: result['avg_conf_0'] or 0.0,
+            1: result['avg_conf_1'] or 0.0,
+            2: result['avg_conf_2'] or 0.0,
+            3: result['avg_conf_3'] or 0.0
         }
     }
 

@@ -187,35 +187,38 @@ def strip_prefix(text: str, prefixes: Optional[Tuple[str, ...]] = None) -> str:
 
 def ensemble_fuzzy_score(s1: str, s2: str, weights: Optional[Dict[str, float]] = None, log: bool = True) -> float:
     """
-    Calculate ensemble fuzzy score combining multiple similarity metrics.
+    Calculate fuzzy score using Levenshtein normalized similarity.
 
-    Default weights:
-    - Token Sort Ratio: 50%
-    - Levenshtein: 30%
-    - Jaccard: 20%
+    SIMPLIFIED: Using 100% Levenshtein (removed Token Sort and Jaccard).
+    - Best for handling typos and spacing issues in Vietnamese addresses
+    - Simpler and faster than ensemble approach
 
     Args:
         s1: First string
         s2: Second string
-        weights: Custom weights dict (optional)
+        weights: Custom weights dict (optional, for backward compatibility)
+        log: Enable debug logging (default: True)
 
     Returns:
-        Ensemble similarity score (0.0-1.0)
+        Similarity score (0.0-1.0)
 
     Example:
-        >>> ensemble_fuzzy_score("ba dinh ha noi", "ha noi ba dinh")
-        0.95
+        >>> ensemble_fuzzy_score("tmo cay", "mo cay")
+        0.857  # Pure Levenshtein
+        >>> ensemble_fuzzy_score("co nhue1", "co nhue 1")
+        0.889  # Pure Levenshtein
     """
     from ..config import DEBUG_FUZZY
 
     if not s1 or not s2:
         return 0.0
 
+    # Simplified: 100% Levenshtein only
+    # Token Sort removed because Vietnamese addresses have fixed order
+    # Jaccard removed because it penalizes hierarchical addresses
     if weights is None:
         weights = {
-            'token_sort': 0.5,
-            'levenshtein': 0.3,
-            'jaccard': 0.2
+            'levenshtein': 1.0
         }
 
     # Only log if explicitly requested AND DEBUG_FUZZY is FULL
@@ -224,25 +227,17 @@ def ensemble_fuzzy_score(s1: str, s2: str, weights: Optional[Dict[str, float]] =
     if should_log:
         logger.debug(f"[FUZZY] Comparing: '{s1}' vs '{s2}'")
 
-    # Calculate individual scores
-    token_score = token_sort_ratio(s1, s2)
+    # Calculate Levenshtein score only
     lev_score = levenshtein_normalized(s1, s2)
-    jac_score = jaccard_similarity(s1, s2)
 
     if should_log:
-        logger.debug(f"[FUZZY]   Token Sort: {token_score:.3f} (weight: {weights.get('token_sort', 0.5):.1f})")
-        logger.debug(f"[FUZZY]   Levenshtein: {lev_score:.3f} (weight: {weights.get('levenshtein', 0.3):.1f})")
-        logger.debug(f"[FUZZY]   Jaccard: {jac_score:.3f} (weight: {weights.get('jaccard', 0.2):.1f})")
+        logger.debug(f"[FUZZY]   Levenshtein: {lev_score:.3f} (weight: 100%)")
 
-    # Weighted average
-    final_score = (
-        token_score * weights.get('token_sort', 0.5) +
-        lev_score * weights.get('levenshtein', 0.3) +
-        jac_score * weights.get('jaccard', 0.2)
-    )
+    # Return Levenshtein score directly (no ensemble needed)
+    final_score = lev_score
 
     if should_log:
-        logger.debug(f"[FUZZY] → Ensemble: {final_score:.3f}")
+        logger.debug(f"[FUZZY] → Score: {final_score:.3f}")
 
     return final_score
 

@@ -2,9 +2,19 @@
 ADDRESS PARSING PIPELINE - DEMO
 ================================
 Usage:
+    # Single address mode
     python demo.py --address "NGO394 DOI CAN P.CONG VI BD HN"
     python demo.py --address "NGO394 DOI CAN P.CONG VI BD HN" --province "Hà Nội"
+
+    # Batch mode (random sampling from DB, chỉ lấy chưa rated)
     python demo.py --limit 5
+    python demo.py --limit 10 --auto
+
+    # Reprocess mode (chạy lại records đã rated, UPDATE với rating mới)
+    python demo.py --reprocess 0,2,3 --limit 10
+    python demo.py --reprocess 3 --limit 5 --auto  # auto: set rating=0
+
+Note: Debug mode is always enabled. Random sampling is always on.
 """
 import sys
 import argparse
@@ -128,18 +138,83 @@ def score_color(score):
 
 
 def load_samples(limit=3, offset=0, random=False):
-    """Load sample addresses từ database"""
+    """
+    Load sample addresses từ database (chỉ lấy records chưa xử lý)
+
+    Args:
+        limit: Số lượng records cần lấy
+        offset: Vị trí bắt đầu
+        random: Random order hay sequential
+
+    Returns:
+        List of address records (chỉ những records chưa có trong user_quality_ratings)
+    """
     order_clause = "ORDER BY RANDOM()" if random else ""
+
+    # Luôn luôn bỏ qua các records đã có trong user_quality_ratings
     query = f"""
-    SELECT cif_no, dia_chi_thuong_tru,
-           ten_tinh_thuong_tru, ten_quan_huyen_thuong_tru
-    FROM raw_addresses
-    WHERE dia_chi_thuong_tru IS NOT NULL
-      AND dia_chi_thuong_tru != ''
+    SELECT r.cif_no, r.dia_chi_thuong_tru,
+           r.ten_tinh_thuong_tru, r.ten_quan_huyen_thuong_tru
+    FROM raw_addresses r
+    WHERE r.dia_chi_thuong_tru IS NOT NULL
+      AND r.dia_chi_thuong_tru != ''
+      AND NOT EXISTS (
+          SELECT 1 FROM user_quality_ratings u
+          WHERE u.original_address = r.dia_chi_thuong_tru
+            AND COALESCE(u.known_province, '') = COALESCE(r.ten_tinh_thuong_tru, '')
+            AND COALESCE(u.known_district, '') = COALESCE(r.ten_quan_huyen_thuong_tru, '')
+      )
     {order_clause}
     LIMIT ? OFFSET ?
     """
+
     return query_all(query, (limit, offset))
+
+
+def load_rated_samples(ratings, limit=3):
+    """
+    Load addresses từ user_quality_ratings với user_rating cụ thể (để reprocess)
+
+    Args:
+        ratings: List of user_rating values to filter (e.g., [0, 2, 3])
+        limit: Số lượng records cần lấy
+
+    Returns:
+        List of address records từ user_quality_ratings với format:
+        {
+            'cif_no': ...,
+            'dia_chi_thuong_tru': original_address,
+            'ten_tinh_thuong_tru': known_province,
+            'ten_quan_huyen_thuong_tru': known_district,
+            'record_id': id (for UPDATE later)
+        }
+    """
+    # Build placeholders for IN clause
+    placeholders = ','.join(['?' for _ in ratings])
+
+    query = f"""
+    SELECT id, cif_no, original_address, known_province, known_district
+    FROM user_quality_ratings
+    WHERE user_rating IN ({placeholders})
+    ORDER BY RANDOM()
+    LIMIT ?
+    """
+
+    params = tuple(ratings) + (limit,)
+    results = query_all(query, params)
+
+    # Map to same format as load_samples() for compatibility
+    mapped_results = []
+    for row in results:
+        mapped_results.append({
+            'record_id': row['id'],  # Keep ID for UPDATE
+            'cif_no': row['cif_no'],
+            'dia_chi_thuong_tru': row['original_address'],
+            'ten_tinh_thuong_tru': row['known_province'] if row['known_province'] else None,
+            'ten_quan_huyen_thuong_tru': row['known_district'] if row['known_district'] else None
+        })
+
+    return mapped_results
 
 
 def process_one_address(address_text, province_known=None, district_known=None):
@@ -1086,7 +1161,7 @@ def generate_batch_rating_report(ratings_list):
     print(f"{'═'*60}\n")
 
 
-def prompt_user_rating(result_data: dict):
+def prompt_user_rating(result_data: dict, auto_flag = None):
     """
     Hỏi người dùng đánh giá chất lượng kết quả và lưu vào database.
 
@@ -1116,20 +1191,23 @@ def prompt_user_rating(result_data: dict):
 
     while True:
         try:
-            user_input = input(f"Nhập lựa chọn {colorize('(1/2/3)', Colors.YELLOW)} hoặc {colorize('Enter', Colors.CYAN)} để bỏ qua: ").strip()
+            if not auto_flag:
+                user_input = input(f"Nhập lựa chọn {colorize('(1/2/3)', Colors.YELLOW)} hoặc {colorize('Enter', Colors.CYAN)} để bỏ qua: ").strip()
 
-            # User skipped
-            if not user_input:
-                print(f"{colorize('⏭ Đã bỏ qua đánh giá', Colors.YELLOW)}\n")
-                return None
+                # User skipped
+                if not user_input:
+                    print(f"{colorize('⏭ Đã bỏ qua đánh giá', Colors.YELLOW)}\n")
+                    return None
 
-            # Validate input
-            if user_input not in ['1', '2', '3']:
-                print(f"{colorize('❌ Lựa chọn không hợp lệ. Vui lòng nhập 1, 2, 3 hoặc Enter.', Colors.RED)}")
-                continue
+                # Validate input
+                if user_input not in ['1', '2', '3']:
+                    print(f"{colorize('❌ Lựa chọn không hợp lệ. Vui lòng nhập 1, 2, 3 hoặc Enter.', Colors.RED)}")
+                    continue
 
-            # Valid rating
-            rating = int(user_input)
+                # Valid rating
+                rating = int(user_input)
+            else:
+                rating = int(0)
 
             # Prepare data for database
             rating_data = {
@@ -1146,17 +1224,18 @@ def prompt_user_rating(result_data: dict):
                 'processing_time_ms': result_data.get('processing_time_ms'),
                 'match_type': result_data.get('match_type')
             }
-
+            
             # Save to database
             record_id = save_user_rating(rating_data)
-
+            
             # Show confirmation with color based on rating
             rating_label = {
+                0: colorize('Chưa đánh giá', Colors.YELLOW_BOLD),
                 1: colorize('Tốt', Colors.GREEN_BOLD),
                 2: colorize('Trung bình', Colors.YELLOW_BOLD),
                 3: colorize('Kém', Colors.RED_BOLD)
             }[rating]
-
+            
             print(f"{colorize('✅', Colors.GREEN)} Đã lưu đánh giá: {rating_label} (ID: {record_id})\n")
             return rating
 
@@ -1174,43 +1253,38 @@ def main():
     parser.add_argument('-a', '--address', type=str, help='Địa chỉ cần xử lý')
     parser.add_argument('-p', '--province', type=str, help='Gợi ý tỉnh')
     parser.add_argument('-d', '--district', type=str, help='Gợi ý huyện')
-    parser.add_argument('-l', '--limit', type=int, default=3, help='Số mẫu từ DB (mặc định: 3)')
-    parser.add_argument('-o', '--offset', type=int, default=0, help='Vị trí bắt đầu (mặc định: 0)')
-    parser.add_argument('-r', '--random', action='store_true', help='Lấy mẫu ngẫu nhiên từ DB')
-    parser.add_argument('--auto', action='store_true', help='Tự động chạy hết không cần nhấn Enter')
-    parser.add_argument('--test-accuracy', action='store_true', help='Chạy batch test với tính accuracy metrics')
-    parser.add_argument('--test-mode',
-                       choices=['blind', 'assisted'],
-                       default='assisted',
-                       help='Test mode: blind (no hints) or assisted (with hints like production)')
-    parser.add_argument('--debug', action='store_true',
-                       help='Enable DEBUG logging (detailed trace of all phases)')
-    parser.add_argument('--debug-failed', action='store_true',
-                       help='Debug failed extractions (show detailed trace)')
+    parser.add_argument('-l', '--limit', type=int, default=3, help='Số mẫu từ DB (mặc định: 3, chỉ lấy records chưa xử lý)')
+    parser.add_argument('--auto', action='store_true', help='Tự động chạy hết không cần nhấn Enter (auto-save với rating=0)')
+    parser.add_argument('--reprocess', type=str, help='Chạy lại records có user_rating cụ thể (comma-separated: 0,2,3)')
 
     args = parser.parse_args()
 
-    # Enable debug logging if --debug flag
-    if args.debug:
-        setup_logging(debug=True)
-        # Enable detailed logging flags
-        from src import config
-        config.DEBUG_SQL = True
-        config.DEBUG_FUZZY = True
-        config.DEBUG_NGRAMS = True
-        config.DEBUG_EXTRACTION = True
-        print(f"{colorize('🐛 DEBUG MODE ENABLED', Colors.YELLOW_BOLD)} - Detailed logging for all phases")
-        print(f"  └─ SQL={Colors.GREEN}✓{Colors.RESET} | FUZZY={Colors.GREEN}✓{Colors.RESET} | NGRAMS={Colors.GREEN}✓{Colors.RESET} | EXTRACTION={Colors.GREEN}✓{Colors.RESET}\n")
+    # Parse and validate --reprocess ratings
+    reprocess_ratings = None
+    if args.reprocess:
+        try:
+            reprocess_ratings = [int(r.strip()) for r in args.reprocess.split(',')]
+            # Validate ratings are in [0, 1, 2, 3]
+            invalid = [r for r in reprocess_ratings if r not in [0, 1, 2, 3]]
+            if invalid:
+                print(f"{colorize(f'❌ Lỗi: Invalid ratings {invalid}. Chỉ chấp nhận 0,1,2,3', Colors.RED)}")
+                sys.exit(1)
+            if not reprocess_ratings:
+                print(f"{colorize('❌ Lỗi: --reprocess không được để trống', Colors.RED)}")
+                sys.exit(1)
+        except ValueError:
+            print(f"{colorize('❌ Lỗi: --reprocess phải là comma-separated numbers. Ví dụ: --reprocess 0,2,3', Colors.RED)}")
+            sys.exit(1)
 
-    # CHẾ ĐỘ 0.5: Debug failed extractions mode
-    if args.debug_failed:
-        debug_failed_extractions(limit=args.limit, show_first=10)
-        return
-
-    # CHẾ ĐỘ 0: Batch accuracy test
-    if args.test_accuracy:
-        batch_test_with_accuracy(args.limit, args.offset, args.random, args.test_mode)
-        return
+    # Always enable debug logging for all modes
+    setup_logging(debug=True)
+    from src import config
+    config.DEBUG_SQL = True
+    config.DEBUG_FUZZY = True
+    config.DEBUG_NGRAMS = True
+    config.DEBUG_EXTRACTION = True
+    print(f"{colorize('🐛 DEBUG MODE ENABLED', Colors.YELLOW_BOLD)} - Detailed logging for all phases")
+    print(f"  └─ SQL={Colors.GREEN}✓{Colors.RESET} | FUZZY={Colors.GREEN}✓{Colors.RESET} | NGRAMS={Colors.GREEN}✓{Colors.RESET} | EXTRACTION={Colors.GREEN}✓{Colors.RESET}\n")
 
     # CHẾ ĐỘ 1: Xử lý 1 địa chỉ
     if args.address:
@@ -1248,16 +1322,24 @@ def main():
     # CHẾ ĐỘ 2: Xử lý từ database
     else:
         print(f"\n{'='*60}")
-        print(colorize(f"CHẾ ĐỘ: Xử lý batch từ database", Colors.CYAN_BOLD))
-        print(f"{'='*60}")
 
-        samples = load_samples(args.limit, args.offset, args.random)
+        # Check if reprocess mode
+        if reprocess_ratings:
+            print(colorize(f"CHẾ ĐỘ: REPROCESS - Chạy lại records đã rated", Colors.CYAN_BOLD))
+            print(colorize(f"  🔄 Filter ratings: {reprocess_ratings}", Colors.YELLOW))
+            samples = load_rated_samples(reprocess_ratings, args.limit)
+        else:
+            print(colorize(f"CHẾ ĐỘ: Xử lý batch từ database", Colors.CYAN_BOLD))
+            print(colorize("  🔄 Chỉ xử lý records chưa có trong user_quality_ratings", Colors.YELLOW))
+            samples = load_samples(args.limit, offset=0, random=True)
+
+        print(f"{'='*60}")
 
         if not samples:
             print(colorize("❌ Không tìm thấy mẫu nào!", Colors.RED))
             return
 
-        print(f"✅ Đã tải {len(samples)} bản ghi\n")
+        print(f"✅ Đã tải {len(samples)} bản ghi (random sampling)\n")
 
         # Track ratings for batch report
         batch_ratings = []
@@ -1273,39 +1355,40 @@ def main():
             )
 
             # Hỏi đánh giá chất lượng (skip nếu có --auto flag)
+            best_match = result.get('phase5_validation', {}).get('best_match')
+
+            result_data = {
+                'cif_no': cif,
+                'original_address': sample['dia_chi_thuong_tru'],
+                'known_province': sample.get('ten_tinh_thuong_tru'),
+                'known_district': sample.get('ten_quan_huyen_thuong_tru'),
+                'parsed_province': best_match.get('province') if best_match else None,
+                'parsed_district': best_match.get('district') if best_match else None,
+                'parsed_ward': best_match.get('ward') if best_match else None,
+                'confidence_score': best_match.get('confidence') if best_match else None,
+                'processing_time_ms': sum([
+                    result.get('phase1', {}).get('processing_time_ms', 0),
+                    result.get('phase3_extraction', {}).get('processing_time_ms', 0),
+                    result.get('phase4_candidates', {}).get('processing_time_ms', 0),
+                    result.get('phase5_validation', {}).get('processing_time_ms', 0),
+                    result.get('phase6_postprocessing', {}).get('processing_time_ms', 0)
+                ]),
+                'match_type': best_match.get('match_type') if best_match else None
+            }
+
+            # Ask for rating (or auto-save if --auto flag)
+            # prompt_user_rating will save to DB (INSERT or UPDATE based on unique constraint)
+            rating = prompt_user_rating(result_data, args.auto)
+
+            # Track rating if provided (not None)
+            if rating is not None:
+                batch_ratings.append(rating)
+
+            # Prompt to continue (skip only if auto mode)
             if not args.auto:
-                p5 = result.get('phase6_postprocessing', {})
-                best_match = result.get('phase5_validation', {}).get('best_match')
-
-                result_data = {
-                    'cif_no': cif,
-                    'original_address': sample['dia_chi_thuong_tru'],
-                    'known_province': sample.get('ten_tinh_thuong_tru'),
-                    'known_district': sample.get('ten_quan_huyen_thuong_tru'),
-                    'parsed_province': best_match.get('province') if best_match else None,
-                    'parsed_district': best_match.get('district') if best_match else None,
-                    'parsed_ward': best_match.get('ward') if best_match else None,
-                    'confidence_score': best_match.get('confidence') if best_match else None,
-                    'processing_time_ms': sum([
-                        result.get('phase1', {}).get('processing_time_ms', 0),
-                        result.get('phase3_extraction', {}).get('processing_time_ms', 0),
-                        result.get('phase4_candidates', {}).get('processing_time_ms', 0),
-                        result.get('phase5_validation', {}).get('processing_time_ms', 0),
-                        result.get('phase6_postprocessing', {}).get('processing_time_ms', 0)
-                    ]),
-                    'match_type': best_match.get('match_type') if best_match else None
-                }
-
-                rating = prompt_user_rating(result_data)
-
-                # Track rating if provided (not None)
-                if rating is not None:
-                    batch_ratings.append(rating)
-
                 if i < len(samples):
                     input(f"\n{colorize('▶ Nhấn Enter để tiếp tục...', Colors.YELLOW)}")
             else:
-                # Auto mode - không hỏi rating
                 if i < len(samples):
                     print()  # Empty line between records
 
