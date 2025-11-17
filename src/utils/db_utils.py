@@ -691,6 +691,43 @@ def get_wards_by_district(province: str, district: str) -> List[Dict[str, Any]]:
     return query_all(query, (province, district))
 
 
+def get_all_districts_for_ward(province: str, ward: str) -> List[str]:
+    """
+    Get all districts that contain a ward with the given name in a province.
+
+    This is useful for disambiguating ward names that exist in multiple districts.
+    For example, "Tứ Liên" exists in both "Tây Hồ" and potentially other districts.
+
+    Args:
+        province: Normalized province name
+        ward: Normalized ward name
+
+    Returns:
+        List of district names (normalized) that contain this ward
+
+    Example:
+        >>> districts = get_all_districts_for_ward('ha noi', 'tu lien')
+        >>> districts
+        ['tay ho']  # Only Tây Hồ has ward "Tứ Liên"
+        >>> districts = get_all_districts_for_ward('ha noi', 'dong ngac')
+        >>> districts
+        ['bac tu liem']  # Only Bắc Từ Liêm has ward "Đông Ngạc"
+    """
+    if not province or not ward:
+        return []
+
+    query = """
+    SELECT DISTINCT district_name_normalized
+    FROM admin_divisions
+    WHERE province_name_normalized = ?
+      AND ward_name_normalized = ?
+    ORDER BY district_name_normalized
+    """
+
+    results = query_all(query, (province, ward))
+    return [r['district_name_normalized'] for r in results if r.get('district_name_normalized')]
+
+
 def get_streets_by_district(province: str, district: str) -> List[Dict[str, Any]]:
     """
     Get all streets belonging to a district in a province.
@@ -1232,6 +1269,128 @@ def get_review_statistics() -> Dict[str, Any]:
             3: result['avg_conf_3'] or 0.0
         }
     }
+
+
+def get_new_addresses_for_old_ward(
+    old_province: str,
+    old_district: str,
+    old_ward: str
+) -> List[Dict[str, Any]]:
+    """
+    Query new addresses for an old ward (exact ward match).
+
+    Args:
+        old_province: Old province name (e.g., "Thành phố Hà Nội")
+        old_district: Old district name (e.g., "Quận Ba Đình")
+        old_ward: Old ward name (e.g., "Phường Trúc Bạch")
+
+    Returns:
+        List of dictionaries with new_province, new_ward, note
+        Sorted by migration priority ("Nhập toàn bộ" first)
+
+    Example:
+        >>> mappings = get_new_addresses_for_old_ward(
+        ...     "Thành phố Hà Nội", "Quận Ba Đình", "Phường Trúc Bạch"
+        ... )
+        >>> mappings[0]
+        {'new_province': 'Thành phố Hà Nội', 'new_ward': 'Phường Ba Đình', 'note': 'Nhập toàn bộ'}
+    """
+    query = """
+        SELECT new_province, new_ward, note
+        FROM admin_division_migration
+        WHERE old_province = ?
+          AND old_district = ?
+          AND old_ward = ?
+        ORDER BY
+            CASE
+                WHEN note LIKE '%Nhập toàn bộ%' THEN 1
+                WHEN note LIKE '%Đổi tên%' THEN 2
+                WHEN note LIKE '%Giữ nguyên%' THEN 3
+                ELSE 4
+            END,
+            new_ward
+    """
+    return query_all(query, (old_province, old_district, old_ward))
+
+
+def get_new_addresses_for_old_district(
+    old_province: str,
+    old_district: str
+) -> List[Dict[str, Any]]:
+    """
+    Query all new addresses for an old district (all wards in district).
+    Returns ALL rows from migration table (may have duplicate new_ward).
+
+    Args:
+        old_province: Old province name (e.g., "Thành phố Hà Nội")
+        old_district: Old district name (e.g., "Quận Ba Đình")
+
+    Returns:
+        List of dictionaries with new_province, new_ward, note
+        Sorted by migration priority
+
+    Example:
+        >>> mappings = get_new_addresses_for_old_district(
+        ...     "Thành phố Hà Nội", "Quận Ba Đình"
+        ... )
+        >>> len(mappings)
+        15  # All wards from Quận Ba Đình → multiple new_ward destinations
+    """
+    query = """
+        SELECT new_province, new_ward, note
+        FROM admin_division_migration
+        WHERE old_province = ?
+          AND old_district = ?
+        ORDER BY
+            CASE
+                WHEN note LIKE '%Nhập toàn bộ%' THEN 1
+                WHEN note LIKE '%Đổi tên%' THEN 2
+                WHEN note LIKE '%Giữ nguyên%' THEN 3
+                ELSE 4
+            END,
+            new_ward
+    """
+    return query_all(query, (old_province, old_district))
+
+
+def get_new_addresses_for_old_province(old_province: str) -> List[Dict[str, Any]]:
+    """
+    Query new provinces for an old province (DISTINCT new_province only).
+    Returns province-level mapping, not individual wards.
+
+    Args:
+        old_province: Old province name (e.g., "Tỉnh Hải Dương")
+
+    Returns:
+        List of dictionaries with new_province, note (NO new_ward field)
+        Sorted by migration priority
+
+    Example:
+        >>> mappings = get_new_addresses_for_old_province("Tỉnh Hải Dương")
+        >>> mappings[0]
+        {'new_province': 'Thành phố Hải Phòng', 'note': 'Nhập toàn bộ'}
+    """
+    query = """
+        SELECT DISTINCT
+            new_province,
+            CASE
+                WHEN COUNT(DISTINCT old_ward) =
+                     (SELECT COUNT(DISTINCT old_ward)
+                      FROM admin_division_migration
+                      WHERE old_province = ?)
+                THEN 'Nhập toàn bộ'
+                ELSE 'Nhập một phần'
+            END as note
+        FROM admin_division_migration
+        WHERE old_province = ?
+        GROUP BY new_province
+        ORDER BY
+            CASE
+                WHEN note LIKE '%Nhập toàn bộ%' THEN 1
+                ELSE 2
+            END
+    """
+    return query_all(query, (old_province, old_province))
 
 
 if __name__ == "__main__":

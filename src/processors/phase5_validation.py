@@ -212,8 +212,81 @@ def rank_candidates(candidates: List[Dict[str, Any]], normalized_text: str = Non
     """
     # Calculate confidence for each candidate
     for candidate in candidates:
-        candidate['final_confidence'] = calculate_confidence_score(candidate, normalized_text)
+        # NEW: Token length validation (check claimed tokens vs actual admin name tokens)
+        token_length_penalty = 1.0
+
+        # Check ward token length mismatch
+        ward = candidate.get('ward')
+        ward_tokens_pos = candidate.get('ward_tokens')
+        if ward and ward_tokens_pos and ward_tokens_pos != (-1, -1):
+            ward_start, ward_end = ward_tokens_pos
+            num_claimed = ward_end - ward_start
+            num_actual = len(ward.lower().strip().split())
+            if num_claimed != num_actual:
+                # Token count mismatch → MILD penalty (giảm từ 0.5-0.8 xuống 0.7-0.9)
+                # Lý do: Token coverage bonus quan trọng hơn length mismatch
+                token_count_ratio = min(num_actual, num_claimed) / max(num_actual, num_claimed)
+                token_length_penalty *= (0.7 + token_count_ratio * 0.2)  # Scale 0.7-0.9 (giảm penalty)
+
+        # Check district token length mismatch
+        district = candidate.get('district')
+        district_tokens_pos = candidate.get('district_tokens')
+        if district and district_tokens_pos and district_tokens_pos != (-1, -1):
+            dist_start, dist_end = district_tokens_pos
+            num_claimed = dist_end - dist_start
+            num_actual = len(district.lower().strip().split())
+            if num_claimed != num_actual:
+                token_count_ratio = min(num_actual, num_claimed) / max(num_actual, num_claimed)
+                token_length_penalty *= (0.7 + token_count_ratio * 0.2)  # Giảm penalty cho district cũng
+
+        # NEW: Token coverage bonus (số lượng UNIQUE tokens matched)
+        # Candidate nào match nhiều tokens hơn từ input → điểm cao hơn
+        # IMPORTANT: Đếm UNIQUE token positions (không duplicate overlapping ranges)
+        token_coverage_bonus = 1.0
+        covered_positions = set()
+
+        # Collect all token positions covered by ward/district/province
+        if ward_tokens_pos and ward_tokens_pos != (-1, -1):
+            for i in range(ward_tokens_pos[0], ward_tokens_pos[1]):
+                covered_positions.add(i)
+
+        if district_tokens_pos and district_tokens_pos != (-1, -1):
+            for i in range(district_tokens_pos[0], district_tokens_pos[1]):
+                covered_positions.add(i)
+
+        province_tokens_pos = candidate.get('province_tokens')
+        if province_tokens_pos and province_tokens_pos != (-1, -1):
+            for i in range(province_tokens_pos[0], province_tokens_pos[1]):
+                covered_positions.add(i)
+
+        total_tokens_used = len(covered_positions)  # Count UNIQUE token positions
+
+        # Bonus scale (AGGRESSIVE): More tokens = significantly higher bonus
+        # 5+ tokens >> 4 tokens >> 3 tokens >> 2 tokens
+        if total_tokens_used >= 6:
+            token_coverage_bonus = 2.0  # ×2.0 for 6+ tokens
+        elif total_tokens_used >= 5:
+            token_coverage_bonus = 1.7  # ×1.7 for 5 tokens
+        elif total_tokens_used >= 4:
+            token_coverage_bonus = 1.3  # ×1.3 for 4 tokens
+        elif total_tokens_used >= 3:
+            token_coverage_bonus = 1.1  # ×1.1 for 3 tokens
+        # else: 1.0 (no bonus for 0-2 tokens)
+
+        base_confidence = calculate_confidence_score(candidate, normalized_text)
+        final_confidence = base_confidence * token_length_penalty * token_coverage_bonus
+
+        # Debug logging
+        logger.debug(f"[RANK] {candidate.get('ward', 'N/A')} | {candidate.get('district', 'N/A')}: "
+                    f"tokens={total_tokens_used}, base={base_confidence:.3f}, "
+                    f"len_penalty={token_length_penalty:.3f}, cov_bonus={token_coverage_bonus:.3f}, "
+                    f"final={final_confidence:.3f}")
+
+        candidate['final_confidence'] = final_confidence
         candidate['hierarchy_valid'] = validate_hierarchy(candidate)
+        candidate['token_length_penalty'] = token_length_penalty  # Store for debugging
+        candidate['token_coverage_bonus'] = token_coverage_bonus  # Store for debugging
+        candidate['total_tokens_used'] = total_tokens_used  # Store for debugging
 
     # Sort by confidence, match type, and at_rule
     match_type_priority = {'exact': 3, 'fuzzy': 2, 'hierarchical_fallback': 1}

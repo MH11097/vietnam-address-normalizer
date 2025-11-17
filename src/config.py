@@ -63,6 +63,7 @@ MATCH_TYPE_WEIGHTS = {
 # Geographic context settings
 GEOGRAPHIC_CONTEXT_BONUS = 1.1  # 10% bonus for matches within hint scope
 HIERARCHY_INVALID_PENALTY = 0.8  # 20% penalty for invalid hierarchy
+WARD_INHERIT_PENALTY = 0.85  # 15% penalty when district is inherited/inferred from ward (not explicit)
 
 # Position-based scoring settings
 POSITION_PENALTY_FACTOR = 0.2  # 20% max penalty for tokens far from end (0.8x-1.0x)
@@ -72,8 +73,44 @@ POSITION_PENALTY_FACTOR = 0.2  # 20% max penalty for tokens far from end (0.8x-1
 NUMERIC_WITHOUT_KEYWORD_PENALTY = 0.7  # 30% penalty (0.7x score) for standalone 1-2 digit numbers
 NUMERIC_WITH_KEYWORD_BONUS = 1.2       # 20% bonus (1.2x score) for numbers with preceding keywords
 
+# Explicit pattern bonus (for "PHUONG X", "XA X" patterns detected by pattern matching)
+EXPLICIT_PATTERN_BONUS = 1.5           # 50% bonus (1.5x score) for explicit admin patterns
+
 # Full administrative keywords (no abbreviations per user preference)
 ADMIN_KEYWORDS_FULL = {'phuong', 'xa', 'quan', 'huyen', 'thanh', 'thi', 'tran', 'pho'}
+
+# Substring matching bonus (for concatenated admin divisions like "AN VINH NGAIKSND")
+SUBSTRING_BONUS_ENABLED = True   # Enable/disable substring bonus in fuzzy matching
+SUBSTRING_BONUS_VALUE = 0.50     # Boost value when substring match found (+50%)
+SUBSTRING_MIN_LENGTH = 5         # Minimum candidate length to check (avoid "AN", "NGAI")
+
+# Context-aware substring bonus (differentiate inherited vs explicit district context)
+SUBSTRING_BONUS_WITH_CONTEXT = 0.50      # Full bonus when district is explicit in text (+50%)
+SUBSTRING_BONUS_WITHOUT_CONTEXT = 0.25   # Reduced bonus when district is inherited/inferred (+25%, 50% reduction)
+
+# Token coverage scoring (measures how much of input text is used in the match)
+TOKEN_COVERAGE_ENABLED = True    # Enable/disable token coverage scoring
+TOKEN_COVERAGE_WEIGHTS = {
+    'coverage_ratio': 0.4,       # 40% - Percentage of meaningful tokens used
+    'continuity': 0.3,           # 30% - How continuous/compact the matched tokens are
+    'weighted': 0.3              # 30% - Weighted by token importance (explicit pattern > keyword > normal)
+}
+TOKEN_IMPORTANCE_WEIGHTS = {
+    'explicit_pattern': 2.0,     # Tokens from explicit patterns (e.g., "xa hoa an") get 2x weight
+    'keyword': 1.5,              # Tokens with admin keywords (e.g., "phuong 3") get 1.5x weight
+    'normal': 1.0                # Normal tokens get 1x weight
+}
+TOKEN_COVERAGE_MULTIPLIERS = {
+    0.95: 1.25,  # >=95% coverage: +25% bonus (near perfect, ward-heavy)
+    0.90: 1.20,  # >=90% coverage: +20% bonus (excellent)
+    0.80: 1.15,  # >=80% coverage: +15% bonus (very good)
+    0.70: 1.10,  # >=70% coverage: +10% bonus (good)
+    0.60: 1.05,  # >=60% coverage: +5% bonus (above average)
+    0.50: 1.00,  # >=50% coverage: neutral
+    0.40: 0.95,  # >=40% coverage: -5% penalty
+    0.20: 0.90,  # >=20% coverage: -10% penalty
+    0.0: 0.85    # <20% coverage: -15% penalty
+}
 
 # Ensemble scoring weights (Simplified: 100% Levenshtein)
 # Token Sort removed - Vietnamese addresses have fixed order, not needed
@@ -97,7 +134,7 @@ SCORING_WEIGHTS = {
 DEBUG_SQL = True        # Log SQL queries, params, and row counts
 DEBUG_FUZZY = 'WINNERS' # Fuzzy matching: OFF | WINNERS (only log best match) | TOP3 | FULL (all comparisons)
 DEBUG_NGRAMS = False    # Log n-gram generation and testing
-DEBUG_EXTRACTION = True # Log extraction flow details
+DEBUG_EXTRACTION = True # Log extraction flow details (OFF/SUMMARY/FULL)
 
 # Fuzzy logging modes explained:
 # - 'OFF' or False: No fuzzy logs

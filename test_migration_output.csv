@@ -1,0 +1,30 @@
+﻿raw_input,province,district,ward,state_code,county_code,remaining_1,remaining_2,remaining_3,at_rule,confidence,quality_flag,total_time_ms,new_province,new_ward,migration_note
+"Phường Trúc Bạch, Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,Phường Trúc Bạch,,,PHUONG QUAN,,,3,2.0,full_address,65.23,Thành phố Hà Nội,Phường Ba Đình,Nhập toàn bộ
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ba Đình,Nhập toàn bộ
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ba Đình,Nhập toàn bộ
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Giảng Võ,Nhập toàn bộ
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Hồng Hà,Nhập toàn bộ
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ngọc Hà,Nhập toàn bộ
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ngọc Hà,Nhập toàn bộ
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ba Đình,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ba Đình,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ba Đình,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ba Đình,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Giảng Võ,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Giảng Võ,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Giảng Võ,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Giảng Võ,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Hoàn Kiếm,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Láng,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ngọc Hà,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ngọc Hà,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ngọc Hà,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ngọc Hà,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ngọc Hà,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Văn Miếu - Quốc Tử Giám,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ô Chợ Dừa,Nhập một phần
+"Quận Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,,,,QUAN,,,0,0.7592,failed,3.874,Thành phố Hà Nội,Phường Ô Chợ Dừa,Nhập một phần
+"Phường Điện Biên, Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,Phường Điện Biên,,,PHUONG,,,3,2.0,full_address,16.74,Thành phố Hà Nội,Phường Ba Đình,Nhập một phần
+"Phường Điện Biên, Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,Phường Điện Biên,,,PHUONG,,,3,2.0,full_address,16.74,Thành phố Hà Nội,Phường Hoàn Kiếm,Nhập một phần
+"Phường Điện Biên, Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,Phường Điện Biên,,,PHUONG,,,3,2.0,full_address,16.74,Thành phố Hà Nội,Phường Văn Miếu - Quốc Tử Giám,Nhập một phần
+"Phường Điện Biên, Ba Đình, Hà Nội",Thành Phố Hà Nội,Quận Ba Đình,Phường Điện Biên,,,PHUONG,,,3,2.0,full_address,16.74,Thành phố Hà Nội,Phường Ô Chợ Dừa,Nhập một phần

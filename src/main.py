@@ -144,7 +144,13 @@ def process_batch(input_file: str, output_file: str = None):
 
 
 def save_results_to_csv(results: list, filepath: Path):
-    """Save results to CSV file."""
+    """
+    Save results to CSV file.
+
+    If an address has migration mappings (new_addresses), write multiple rows:
+    - One row per new address mapping
+    - Duplicate old address info across all rows
+    """
     if not results:
         return
 
@@ -153,7 +159,9 @@ def save_results_to_csv(results: list, filepath: Path):
             'raw_input', 'province', 'district', 'ward',
             'state_code', 'county_code',
             'remaining_1', 'remaining_2', 'remaining_3',
-            'at_rule', 'confidence', 'quality_flag', 'total_time_ms'
+            'at_rule', 'confidence', 'quality_flag', 'total_time_ms',
+            # New migration fields
+            'new_province', 'new_ward', 'migration_note'
         ]
 
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -161,7 +169,9 @@ def save_results_to_csv(results: list, filepath: Path):
 
         for result in results:
             output = result['final_output']
-            row = {
+
+            # Base row with old address information
+            base_row = {
                 'raw_input': result['raw_input'],
                 'province': output.get('province', ''),
                 'district': output.get('district', ''),
@@ -176,7 +186,25 @@ def save_results_to_csv(results: list, filepath: Path):
                 'quality_flag': result['quality_flag'],
                 'total_time_ms': result['total_time_ms']
             }
-            writer.writerow(row)
+
+            # Get new addresses from migration
+            new_addresses = output.get('new_addresses', [])
+
+            if new_addresses:
+                # Multiple rows - one per new address mapping
+                for new_addr in new_addresses:
+                    row = base_row.copy()
+                    row['new_province'] = new_addr.get('new_province', '')
+                    row['new_ward'] = new_addr.get('new_ward', '')
+                    row['migration_note'] = new_addr.get('note', '')
+                    writer.writerow(row)
+            else:
+                # No mappings - single row with empty new_* fields
+                row = base_row.copy()
+                row['new_province'] = ''
+                row['new_ward'] = ''
+                row['migration_note'] = ''
+                writer.writerow(row)
 
 
 def main():

@@ -185,30 +185,50 @@ def strip_prefix(text: str, prefixes: Optional[Tuple[str, ...]] = None) -> str:
     return text_lower
 
 
-def ensemble_fuzzy_score(s1: str, s2: str, weights: Optional[Dict[str, float]] = None, log: bool = True) -> float:
+def ensemble_fuzzy_score(s1: str, s2: str, weights: Optional[Dict[str, float]] = None, log: bool = True, return_match_details: bool = False, has_district_context: bool = False):
     """
-    Calculate fuzzy score using Levenshtein normalized similarity.
+    Calculate fuzzy score using Levenshtein + substring bonus.
 
     SIMPLIFIED: Using 100% Levenshtein (removed Token Sort and Jaccard).
     - Best for handling typos and spacing issues in Vietnamese addresses
     - Simpler and faster than ensemble approach
+    - Added substring bonus for concatenated admin divisions
+    - Context-aware substring bonus: reduced when district is inherited vs explicit
 
     Args:
-        s1: First string
-        s2: Second string
+        s1: First string (usually ngram from input text)
+        s2: Second string (usually candidate from database)
         weights: Custom weights dict (optional, for backward compatibility)
         log: Enable debug logging (default: True)
+        return_match_details: If True, returns tuple (score, substring_start_char, substring_length)
+        has_district_context: Whether district is explicitly present (True) or inherited/inferred (False)
 
     Returns:
-        Similarity score (0.0-1.0)
+        If return_match_details=False: Similarity score (0.0-1.0)
+        If return_match_details=True: Tuple (score, substring_start_char, substring_length)
+            - substring_start_char: Character position where s2 starts in s1 (-1 if no substring match)
+            - substring_length: Length of matched substring in characters (0 if no substring match)
 
     Example:
         >>> ensemble_fuzzy_score("tmo cay", "mo cay")
         0.857  # Pure Levenshtein
         >>> ensemble_fuzzy_score("co nhue1", "co nhue 1")
         0.889  # Pure Levenshtein
+        >>> ensemble_fuzzy_score("an vinh ngaiksnd", "an vinh ngai", has_district_context=True)
+        0.88   # Levenshtein 0.38 + substring bonus 0.50 (with context)
+        >>> ensemble_fuzzy_score("an vinh ngaiksnd", "an vinh ngai", has_district_context=False)
+        0.63   # Levenshtein 0.38 + substring bonus 0.25 (without context, ~50% reduction)
+        >>> ensemble_fuzzy_score("an thap muoi", "thap muoi", return_match_details=True)
+        (1.0, 3, 9)  # Match at char position 3, length 9
     """
-    from ..config import DEBUG_FUZZY
+    from ..config import (
+        DEBUG_FUZZY,
+        SUBSTRING_BONUS_ENABLED,
+        SUBSTRING_BONUS_VALUE,
+        SUBSTRING_MIN_LENGTH,
+        SUBSTRING_BONUS_WITH_CONTEXT,
+        SUBSTRING_BONUS_WITHOUT_CONTEXT
+    )
 
     if not s1 or not s2:
         return 0.0
@@ -227,19 +247,50 @@ def ensemble_fuzzy_score(s1: str, s2: str, weights: Optional[Dict[str, float]] =
     if should_log:
         logger.debug(f"[FUZZY] Comparing: '{s1}' vs '{s2}'")
 
-    # Calculate Levenshtein score only
-    lev_score = levenshtein_normalized(s1, s2)
+    # Normalize strings for comparison
+    s1_norm = s1.lower().strip()
+    s2_norm = s2.lower().strip()
+
+    # Calculate Levenshtein score
+    lev_score = levenshtein_normalized(s1_norm, s2_norm)
 
     if should_log:
         logger.debug(f"[FUZZY]   Levenshtein: {lev_score:.3f} (weight: 100%)")
 
-    # Return Levenshtein score directly (no ensemble needed)
-    final_score = lev_score
+    # Check for substring bonus
+    substring_bonus = 0.0
+    substring_match = False
+    substring_start_char = -1
+    substring_length = 0
+
+    if SUBSTRING_BONUS_ENABLED and len(s2_norm) >= SUBSTRING_MIN_LENGTH:
+        # Check if candidate (s2) is substring of input text (s1)
+        # Keep spaces to avoid false positives
+        if s2_norm in s1_norm:
+            # Context-aware substring bonus: reduced when district is inherited
+            if has_district_context:
+                substring_bonus = SUBSTRING_BONUS_WITH_CONTEXT  # Full bonus (+0.50)
+            else:
+                substring_bonus = SUBSTRING_BONUS_WITHOUT_CONTEXT  # Reduced bonus (+0.25)
+
+            substring_match = True
+            substring_start_char = s1_norm.find(s2_norm)
+            substring_length = len(s2_norm)
+
+            if should_log:
+                context_info = "with context" if has_district_context else "without context (inherited)"
+                logger.debug(f"[FUZZY]   Substring: YES ('{s2_norm}' in '{s1_norm}' at pos {substring_start_char}, bonus: +{substring_bonus:.2f} [{context_info}])")
+
+    # Calculate final score
+    final_score = min(1.0, lev_score + substring_bonus)
 
     if should_log:
         logger.debug(f"[FUZZY] → Score: {final_score:.3f}")
 
-    return final_score
+    if return_match_details:
+        return (final_score, substring_start_char, substring_length)
+    else:
+        return final_score
 
 
 def exact_match(text: str, candidates: Set[str]) -> Optional[str]:

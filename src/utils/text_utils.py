@@ -259,7 +259,7 @@ def finalize_normalization(text: str, keep_separators: bool = False) -> str:
         # Replace commas and hyphens with spaces to avoid parsing issues
         # Cases like "55,P14,Q" should become "55 P14 Q" for proper tokenization
         result = re.sub(r'[,\-_]', ' ', result)  # Replace commas, hyphens, and underscores with spaces
-        result = re.sub(r'[^\w\s]', ' ', result)  # Remove all other special chars
+        result = re.sub(r'[^\w\s]', '', result)  # Remove all other special chars
     else:
         result = remove_special_chars(result, keep_spaces=True)
 

@@ -693,6 +693,22 @@ def process_one_address(address_text, province_known=None, district_known=None):
     if formatted_output.get('county_code'):
         print(f"  └─ COUNTY code: {colorize(formatted_output.get('county_code', ''), Colors.CYAN)}")
 
+    # Hiển thị migration mappings (địa chỉ mới)
+    new_addresses = formatted_output.get('new_addresses', [])
+    if new_addresses:
+        print(f"  └─ Địa chỉ mới (Migration mappings): {colorize(f'{len(new_addresses)} mapping(s)', Colors.CYAN)}")
+        for i, addr in enumerate(new_addresses[:5], 1):  # Show first 5
+            if 'new_ward' in addr:
+                # Ward/District level: có new_ward
+                new_display = f"{addr['new_ward']}, {addr['new_province']}"
+            else:
+                # Province level: chỉ có new_province
+                new_display = addr['new_province']
+            note = addr.get('note', '')
+            print(f"     └─ {i}. {colorize(new_display, Colors.GREEN)} ({colorize(note, Colors.YELLOW)})")
+        if len(new_addresses) > 5:
+            print(f"     └─ ... và {len(new_addresses) - 5} mapping(s) khác")
+
     # Tổng thời gian
     total_time = sum([p1['processing_time_ms'], p2['processing_time_ms'], p3['processing_time_ms'],
                       p4['processing_time_ms'], p5['processing_time_ms']])
@@ -785,6 +801,24 @@ def process_one_address(address_text, province_known=None, district_known=None):
                 print(f"       └─ {colorize(interpretation, Colors.YELLOW)}")
     else:
         print(f"\nNo candidates found")
+
+    # Show migration mappings if any
+    new_addresses = formatted_output.get('new_addresses', [])
+    if new_addresses:
+        print(f"\n{colorize('NEW ADDRESSES (Migration Mappings):', Colors.BOLD)}")
+        for i, addr in enumerate(new_addresses[:10], 1):  # Show first 10
+            if 'new_ward' in addr:
+                # Ward/District level
+                new_display = f"{addr['new_ward']}, {addr['new_province']}"
+            else:
+                # Province level only
+                new_display = addr['new_province']
+            note = addr.get('note', '')
+            note_colored = colorize(note, Colors.YELLOW)
+            display_colored = colorize(new_display, Colors.GREEN)
+            print(f"  └─ {i}. {display_colored} ({note_colored})")
+        if len(new_addresses) > 10:
+            print(f"  └─ ... và {len(new_addresses) - 10} mapping(s) khác")
 
     print(f"{'='*60}\n")
 

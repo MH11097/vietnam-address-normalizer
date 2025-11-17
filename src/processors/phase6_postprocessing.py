@@ -13,7 +13,7 @@ from ..utils.db_utils import find_exact_match
 logger = logging.getLogger(__name__)
 
 
-def format_output(best_match: Dict[str, Any], metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+def format_output(best_match: Dict[str, Any], metadata: Dict[str, Any] = None, lookup_migrations: bool = True) -> Dict[str, Any]:
     """
     Format final output with all required fields.
 
@@ -22,10 +22,12 @@ def format_output(best_match: Dict[str, Any], metadata: Dict[str, Any] = None) -
     - Format remaining address
     - Add ACN cross-validation
     - Split remaining into 3 columns (40 chars each)
+    - Lookup migration mappings (old address → new addresses)
 
     Args:
         best_match: Best match from Phase 4
         metadata: Additional metadata (original input, etc.)
+        lookup_migrations: If True, lookup new addresses from migration table (default: True)
 
     Returns:
         Formatted output dictionary
@@ -41,7 +43,9 @@ def format_output(best_match: Dict[str, Any], metadata: Dict[str, Any] = None) -
             'remaining_1': '...',
             'remaining_2': '',
             'remaining_3': '',
-            ...
+            'new_addresses': [
+                {'new_province': 'Thành phố Hà Nội', 'new_ward': 'Phường Ba Đình', 'note': 'Nhập toàn bộ'}
+            ]
         }
     """
     logger.debug("[🔍 DEBUG] " + "═" * 76)
@@ -107,6 +111,35 @@ def format_output(best_match: Dict[str, Any], metadata: Dict[str, Any] = None) -
     district_formatted = _capitalize_full_name(district_full) if district_full else (_capitalize(district) if district else '')
     ward_formatted = _capitalize_full_name(ward_full) if ward_full else (_capitalize(ward) if ward else '')
 
+    # Lookup migration mappings (old address → new addresses)
+    new_addresses = []
+    if lookup_migrations and (province_full or district_full or ward_full):
+        from ..utils.db_utils import (
+            get_new_addresses_for_old_ward,
+            get_new_addresses_for_old_district,
+            get_new_addresses_for_old_province
+        )
+
+        # Logic cascade: ward level > district level > province level
+        if ward_full:
+            # Ward level: exact match
+            new_addresses = get_new_addresses_for_old_ward(
+                province_full, district_full, ward_full
+            )
+            logger.debug(f"[MIGRATION] Ward lookup: {province_full}/{district_full}/{ward_full} → {len(new_addresses)} mappings")
+        elif district_full:
+            # District level: all wards in district
+            new_addresses = get_new_addresses_for_old_district(
+                province_full, district_full
+            )
+            logger.debug(f"[MIGRATION] District lookup: {province_full}/{district_full} → {len(new_addresses)} mappings")
+        elif province_full:
+            # Province level: DISTINCT new provinces only
+            new_addresses = get_new_addresses_for_old_province(
+                province_full
+            )
+            logger.debug(f"[MIGRATION] Province lookup: {province_full} → {len(new_addresses)} mappings")
+
     return {
         'province': province_formatted,
         'district': district_formatted,
@@ -119,6 +152,7 @@ def format_output(best_match: Dict[str, Any], metadata: Dict[str, Any] = None) -
         'at_rule': best_match.get('at_rule', 0),
         'confidence': best_match.get('final_confidence', 0),
         'match_type': best_match.get('match_type', ''),
+        'new_addresses': new_addresses,
     }
 
 
