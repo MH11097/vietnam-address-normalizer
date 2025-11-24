@@ -17,13 +17,13 @@ HELPER_FILE = DATA_DIR / 'merge_file3.csv'
 HELPER_MANUAL_FILE = DATA_DIR / 'merged_file_manual3.csv'
 ABBREVIATIONS_FILE = DATA_DIR / 'tenVietTat.csv'
 
-# Fuzzy matching thresholds (Updated: 85% for balanced approach)
-# Lowered from 88% to 85% to handle spacing issues like "co nhue1" → "co nhue 1"
-# Combined with 50/50 weight balance (Token Sort / Levenshtein)
+# Fuzzy matching thresholds (Updated: 90% for balanced approach)
+# Increased from 85% to 90% to reduce false positives while allowing some tolerance
+# Combined with 100% Levenshtein weight
 FUZZY_THRESHOLDS = {
-    'province': 85,
-    'district': 85,
-    'ward': 85
+    'province': 90,
+    'district': 90,
+    'ward': 90
 }
 
 # Confidence thresholds for quality flags
