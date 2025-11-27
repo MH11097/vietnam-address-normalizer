@@ -81,9 +81,9 @@ def _build_phase3_from_structural(phase2_result: Dict[str, Any], phase1_result: 
         'ward_full': ward_full,
         'district_full': district_full,
         'province_full': province_full,
-        'ward_score': 95 if ward else 0,
-        'district_score': 95 if district else 0,
-        'province_score': 100 if province else 0,
+        'ward_score': 0.95 if ward else 0,
+        'district_score': 0.95 if district else 0,
+        'province_score': 1.0 if province else 0,
         'confidence': phase2_result['confidence'],
         'source': f"structural_{phase2_result['method']}",
         'hierarchy_valid': True,  # Assume valid from structural parsing
@@ -105,9 +105,9 @@ def _build_phase3_from_structural(phase2_result: Dict[str, Any], phase1_result: 
         'province': phase2_result.get('province'),
         'district': phase2_result.get('district'),
         'ward': phase2_result.get('ward'),
-        'province_score': 100 if phase2_result.get('province') else 0,
-        'district_score': 95 if phase2_result.get('district') else 0,
-        'ward_score': 95 if phase2_result.get('ward') else 0,
+        'province_score': 1.0 if phase2_result.get('province') else 0,
+        'district_score': 0.95 if phase2_result.get('district') else 0,
+        'ward_score': 0.95 if phase2_result.get('ward') else 0,
         'normalized_text': phase1_result.get('normalized', '')
     }
 
@@ -175,7 +175,8 @@ class AddressPipeline:
             phase2_result = phase2_structural.structural_parse(
                 phase1_result['normalized'],
                 province_known=province_known,
-                district_known=district_known
+                district_known=district_known,
+                delimiter_info=phase1_result.get('delimiter_info')
             )
             phase_results['phase2'] = phase2_result
 

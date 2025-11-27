@@ -17,13 +17,14 @@ HELPER_FILE = DATA_DIR / 'merge_file3.csv'
 HELPER_MANUAL_FILE = DATA_DIR / 'merged_file_manual3.csv'
 ABBREVIATIONS_FILE = DATA_DIR / 'tenVietTat.csv'
 
-# Fuzzy matching thresholds (Updated: 90% for balanced approach)
-# Increased from 85% to 90% to reduce false positives while allowing some tolerance
+# Fuzzy matching thresholds (Updated: 0.90 for balanced approach)
+# Increased from 0.85 to 0.90 to reduce false positives while allowing some tolerance
 # Combined with 100% Levenshtein weight
+# Note: All scores use 0-1 scale for consistency
 FUZZY_THRESHOLDS = {
-    'province': 90,
-    'district': 90,
-    'ward': 90
+    'province': 0.90,
+    'district': 0.90,
+    'ward': 0.90
 }
 
 # Confidence thresholds for quality flags
@@ -68,10 +69,26 @@ WARD_INHERIT_PENALTY = 0.85  # 15% penalty when district is inherited/inferred f
 # Position-based scoring settings
 POSITION_PENALTY_FACTOR = 0.2  # 20% max penalty for tokens far from end (0.8x-1.0x)
 
+# Delimiter handling settings
+# When users include delimiters, they have clear intent - respect segment boundaries
+USE_DELIMITER_HINTS = True  # Enable/disable delimiter-aware scoring
+DELIMITER_CHARS = [',', '-', '_', '/']  # Characters treated as delimiters
+DELIMITER_CROSS_PENALTY = 0.85  # 15% penalty when n-gram crosses delimiter boundary
+DELIMITER_WITHIN_BONUS = 1.10  # 10% bonus when n-gram is fully within segment
+
+# Slash handling in address numbers (e.g., "55/2 Nguyen Trai")
+# Slash is kept as part of token when it's between digits
+SLASH_NUMBER_PATTERN = r'\d+/\d+'  # Pattern to detect address numbers with slash
+
 # Keyword context scoring for numeric administrative divisions
 # When numbers appear standalone (e.g., "1") vs with keywords (e.g., "phuong 1")
 NUMERIC_WITHOUT_KEYWORD_PENALTY = 0.7  # 30% penalty (0.7x score) for standalone 1-2 digit numbers
 NUMERIC_WITH_KEYWORD_BONUS = 1.2       # 20% bonus (1.2x score) for numbers with preceding keywords
+
+# Fuzzy quality penalty exponent
+# Low fuzzy scores get exponential penalties: score^EXPONENT
+# 0.85^2=0.72, 0.90^2=0.81, 0.95^2=0.90, 1.0^2=1.0
+FUZZY_QUALITY_EXPONENT = 2
 
 # Explicit pattern bonus (for "PHUONG X", "XA X" patterns detected by pattern matching)
 EXPLICIT_PATTERN_BONUS = 1.5           # 50% bonus (1.5x score) for explicit admin patterns

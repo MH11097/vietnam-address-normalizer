@@ -53,7 +53,8 @@ NOISE_PATTERNS = re.compile(
 def structural_parse(
     normalized_address: str,
     province_known: Optional[str] = None,
-    district_known: Optional[str] = None
+    district_known: Optional[str] = None,
+    delimiter_info: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Main structural parsing function.
@@ -68,6 +69,7 @@ def structural_parse(
         normalized_address: Normalized text from Phase 1 (lowercase, no accents)
         province_known: Known province from raw data (optional, trusted)
         district_known: Known district from raw data (optional, trusted)
+        delimiter_info: Delimiter information from Phase 1 (optional, for Phase 3 scoring)
 
     Returns:
         {
@@ -75,6 +77,7 @@ def structural_parse(
             'confidence': float (always 0 to trigger Phase 3),
             'segments': List[Dict] with boost scores,
             'has_structure': bool,
+            'delimiter_info': Dict from Phase 1 (passed through for Phase 3),
             'processing_time_ms': float
         }
 
@@ -93,18 +96,19 @@ def structural_parse(
     start_time = time.time()
 
     if not normalized_address:
-        return _empty_result(0)
+        return _empty_result(0, delimiter_info)
 
     # Skip structural parsing if address contains organizational noise
     # These addresses are better handled by n-gram extraction
     if NOISE_PATTERNS.search(normalized_address):
-        return _empty_result((time.time() - start_time) * 1000)
+        return _empty_result((time.time() - start_time) * 1000, delimiter_info)
 
     # Tier 1: Comma-separated parsing (highest confidence)
     if ',' in normalized_address:
         result = parse_comma_separated(normalized_address, province_known, district_known)
         if result['confidence'] > 0:
             result['processing_time_ms'] = (time.time() - start_time) * 1000
+            result['delimiter_info'] = delimiter_info
             return result
 
     # Tier 1b: Dash-separated parsing (treat like comma)
@@ -115,6 +119,7 @@ def structural_parse(
         if result['confidence'] > 0:
             result['method'] = 'dash_keyword'
             result['processing_time_ms'] = (time.time() - start_time) * 1000
+            result['delimiter_info'] = delimiter_info
             return result
 
     # Tier 1c: Underscore-separated parsing (treat like comma)
@@ -125,20 +130,22 @@ def structural_parse(
         if result['confidence'] > 0:
             result['method'] = 'underscore_keyword'
             result['processing_time_ms'] = (time.time() - start_time) * 1000
+            result['delimiter_info'] = delimiter_info
             return result
 
     # No delimiter found - return confidence=0 to trigger n-gram fallback (Phase 3)
     # Phase 3 will handle keyword-based extraction
-    return _empty_result((time.time() - start_time) * 1000)
+    return _empty_result((time.time() - start_time) * 1000, delimiter_info)
 
 
-def _empty_result(processing_time_ms: float) -> Dict[str, Any]:
+def _empty_result(processing_time_ms: float, delimiter_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Return empty result indicating no structural parsing possible."""
     return {
         'method': 'none',
         'confidence': 0,
         'segments': [],
         'has_structure': False,
+        'delimiter_info': delimiter_info,
         'processing_time_ms': round(processing_time_ms, 3)
     }
 

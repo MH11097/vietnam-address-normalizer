@@ -114,12 +114,15 @@ def extract_components(
     logger.debug(f"[PHASE 3] Step 1: Extracting potentials from database")
     # Pass original text (before abbreviation expansion) for direct match bonus
     original_text_for_matching = preprocessed.get('no_accent', preprocessed.get('unicode_normalized'))
+    # Get delimiter info from preprocessing (if available)
+    delimiter_info = preprocessed.get('delimiter_info')
     extraction_result = extract_with_database(
         normalized_text,
         province_known=prov_known_norm,
         district_known=dist_known_norm,
         original_text_for_matching=original_text_for_matching,
-        phase2_segments=phase2_segments or []
+        phase2_segments=phase2_segments or [],
+        delimiter_info=delimiter_info
     )
     
     # Log extraction results

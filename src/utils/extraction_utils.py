@@ -456,34 +456,41 @@ def expand_tokens_with_context(
     return expanded.split()
 
 
-def generate_ngrams(tokens: List[str], max_n: int = 4) -> List[Tuple[str, Tuple[int, int], bool]]:
+def generate_ngrams(
+    tokens: List[str],
+    max_n: int = 4,
+    delimiter_info: Optional[Dict] = None
+) -> List[Tuple[str, Tuple[int, int], bool, float]]:
     """
-    Generate n-grams from tokens (1-gram to max_n-gram).
-    Returns list of (ngram_text, (start_idx, end_idx), has_keyword)
+    Generate n-grams from tokens (1-gram to max_n-gram) with delimiter-aware scoring.
+    Returns list of (ngram_text, (start_idx, end_idx), has_keyword, delimiter_score)
 
     Args:
         tokens: List of word tokens
         max_n: Maximum n-gram size (default: 4)
+        delimiter_info: Optional delimiter information from tokenization (for scoring)
 
     Returns:
-        List of (ngram_string, (start_index, end_index), has_admin_keyword) tuples
+        List of (ngram_string, (start_index, end_index), has_admin_keyword, delimiter_score) tuples
         Sorted by n descending (longer phrases first)
         has_admin_keyword: True if the token immediately before this n-gram is an admin keyword
+        delimiter_score: Multiplier based on delimiter boundaries (1.0=neutral, <1.0=penalty, >1.0=bonus)
 
     Example:
         >>> generate_ngrams(['phuong', '1', 'quan', '3'], max_n=2)
-        [('phuong 1 quan 3', (0, 4), False),  # 4-gram (no preceding keyword)
-         ('phuong 1 quan', (0, 3), False),     # 3-gram
-         ('1 quan 3', (1, 4), True),           # 3-gram (preceded by 'phuong')
-         ('phuong 1', (0, 2), False),          # 2-gram
-         ('1 quan', (1, 3), True),             # 2-gram (preceded by 'phuong')
-         ('quan 3', (2, 4), False),            # 2-gram
-         ('phuong', (0, 1), False),            # 1-gram
-         ('1', (1, 2), True),                  # 1-gram (preceded by 'phuong')
-         ('quan', (2, 3), False),              # 1-gram
-         ('3', (3, 4), True)]                  # 1-gram (preceded by 'quan')
+        [('phuong 1 quan 3', (0, 4), False, 1.0),  # 4-gram
+         ('phuong 1 quan', (0, 3), False, 1.0),     # 3-gram
+         ('1 quan 3', (1, 4), True, 0.85),           # 3-gram (crosses delimiter, penalty)
+         ('phuong 1', (0, 2), False, 1.1),          # 2-gram (within segment, bonus)
+         ('1 quan', (1, 3), True, 0.85),             # 2-gram (crosses delimiter)
+         ('quan 3', (2, 4), False, 1.1),            # 2-gram (within segment)
+         ('phuong', (0, 1), False, 1.1),            # 1-gram
+         ('1', (1, 2), True, 1.1),                  # 1-gram
+         ('quan', (2, 3), False, 1.1),              # 1-gram
+         ('3', (3, 4), True, 1.1)]                  # 1-gram
     """
     from ..config import DEBUG_NGRAMS, ADMIN_KEYWORDS_FULL
+    from .text_utils import calculate_delimiter_score
 
     if not tokens:
         return []
@@ -504,17 +511,30 @@ def generate_ngrams(tokens: List[str], max_n: int = 4) -> List[Tuple[str, Tuple[
                 prev_token = clean_token(tokens[i-1])
                 has_keyword = prev_token in ADMIN_KEYWORDS_FULL
 
-            ngrams.append((ngram_text, (i, i+n), has_keyword))
+            # Calculate delimiter-aware score
+            delimiter_score = 1.0  # Default neutral
+            if delimiter_info:
+                delimiter_score = calculate_delimiter_score(
+                    ngram_start=i,
+                    ngram_end=i+n,
+                    delimiter_info=delimiter_info
+                )
+
+            ngrams.append((ngram_text, (i, i+n), has_keyword, delimiter_score))
 
     if DEBUG_NGRAMS:
         logger.debug(f"[NGRAMS] Generated {len(ngrams)} n-grams from {len(tokens)} tokens (max_n={max_n})")
         # Show breakdown by n
         ngram_counts = {}
-        for ngram, _, _ in ngrams:
+        for ngram, _, _, _ in ngrams:
             n = len(ngram.split())
             ngram_counts[n] = ngram_counts.get(n, 0) + 1
         breakdown = ', '.join([f"{n}-gram:{count}" for n, count in sorted(ngram_counts.items(), reverse=True)])
         logger.debug(f"[NGRAMS]   Breakdown: {breakdown}")
+
+        # Log delimiter info if present
+        if delimiter_info and delimiter_info.get('has_delimiters'):
+            logger.debug(f"[NGRAMS]   Delimiter-aware: {len(delimiter_info['segments'])} segments detected")
 
     return ngrams
 
@@ -528,7 +548,8 @@ def match_in_set(
     level: str = 'ward',
     return_token_adjustments: bool = False,
     ngram_token_positions: Optional[Tuple[int, int]] = None,
-    has_district_context: bool = False
+    has_district_context: bool = False,
+    delimiter_score: float = 1.0
 ) -> Union[List[Tuple[str, float]], List[Tuple[str, float, Tuple[int, int]]]]:
     """
     Match n-gram against candidate set with exact/fuzzy matching.
@@ -546,6 +567,9 @@ def match_in_set(
     NEW (CONTEXT-AWARE): Accepts has_district_context to apply reduced substring bonus
     when district is inherited/inferred rather than explicitly present.
 
+    NEW (DELIMITER-AWARE): Accepts delimiter_score multiplier to apply penalty/bonus
+    based on delimiter boundary crossing.
+
     Args:
         ngram: N-gram text to match
         candidates: Set of candidate strings (fallback if Token Index unavailable)
@@ -556,6 +580,7 @@ def match_in_set(
         return_token_adjustments: If True, returns adjusted token positions for substring matches
         ngram_token_positions: Original (start_idx, end_idx) of ngram, required if return_token_adjustments=True
         has_district_context: Whether district is explicitly present (True) or inherited (False)
+        delimiter_score: Multiplier for delimiter-aware scoring (1.0=neutral, <1.0=penalty, >1.0=bonus)
 
     Returns:
         If return_token_adjustments=False:
@@ -653,12 +678,16 @@ def match_in_set(
                         ngram, candidate_name, log=False, return_match_details=True,
                         has_district_context=has_district_context
                     )
+                    # Apply delimiter score multiplier
+                    score *= delimiter_score
                     all_scores.append((candidate_name, score, char_start, char_length))
                 else:
                     score = ensemble_fuzzy_score(
                         ngram, candidate_name, log=False,
                         has_district_context=has_district_context
                     )
+                    # Apply delimiter score multiplier
+                    score *= delimiter_score
                     all_scores.append((candidate_name, score, -1, 0))
 
                 if score >= threshold and score > best_score:
@@ -746,12 +775,16 @@ def match_in_set(
                 ngram, candidate, log=False, return_match_details=True,
                 has_district_context=has_district_context
             )
+            # Apply delimiter score multiplier
+            score *= delimiter_score
             all_scores.append((candidate, score, char_start, char_length))
         else:
             score = ensemble_fuzzy_score(
                 ngram, candidate, log=False,
                 has_district_context=has_district_context
             )
+            # Apply delimiter score multiplier
+            score *= delimiter_score
             all_scores.append((candidate, score, -1, 0))
 
         if score >= threshold and score > best_score:
@@ -810,7 +843,8 @@ def extract_with_database(
     province_known: Optional[str] = None,
     district_known: Optional[str] = None,
     original_text_for_matching: Optional[str] = None,
-    phase2_segments: list = None
+    phase2_segments: list = None,
+    delimiter_info: Optional[Dict] = None
 ) -> Dict:
     """
     Extract province/district/ward using hierarchical scoped search.
@@ -869,7 +903,8 @@ def extract_with_database(
         province_known=province_known,
         district_known=district_known,
         max_branches=5,
-        phase2_segments=phase2_segments or []
+        phase2_segments=phase2_segments or [],
+        delimiter_info=delimiter_info
     )
 
     if not candidates:
@@ -1103,6 +1138,11 @@ def generate_candidate_combinations(
         scores = [s for s in [prov_score, dist_score, ward_score] if s > 0]
         base_score = sum(scores) / len(scores) if scores else 0
 
+        # Calculate fuzzy quality penalty (exponential)
+        # Low fuzzy scores get heavy penalties: 0.85^2=0.72, 0.90^2=0.81, 0.95^2=0.90, 1.0^2=1.0
+        from ..config import FUZZY_QUALITY_EXPONENT
+        fuzzy_quality_penalty = base_score ** FUZZY_QUALITY_EXPONENT if base_score > 0 else 0
+
         # Calculate proximity score (NEW!)
         proximity_score = calculate_proximity_score(
             {'province': prov, 'district': dist, 'ward': ward},
@@ -1129,9 +1169,6 @@ def generate_candidate_combinations(
             match_level = 2
         elif prov:
             match_level = 1
-
-        # Completeness score
-        completeness = 1.0 if match_level == 3 else 0.7 if match_level == 2 else 0.4
 
         # Validate hierarchy if we have province and ward/district
         hierarchy_valid = True
@@ -1188,21 +1225,20 @@ def generate_candidate_combinations(
                 district_penalty = 0.5 + (token_count_ratio * 0.3)
                 token_similarity_penalty *= district_penalty  # Compound penalty
 
-        # Combined score with IMPROVED formula (increased hierarchy weight):
-        # - Proximity: 45% (decreased from 50% to make room for hierarchy)
-        # - Base fuzzy scores: 25% (decreased from 30%)
-        # - Completeness: 10% (decreased from 15%)
-        # - Hierarchy: 20% (INCREASED from 5% - major change!)
-        # Then apply order bonus, adjacency bonus, and hierarchy penalty multipliers
+        # Combined score with IMPROVED formula (increased fuzzy weight for better penalty effect):
+        # - Proximity: 30% (decreased from 45% to emphasize fuzzy quality)
+        # - Base fuzzy scores: 50% (INCREASED - compensates for removed completeness)
+        # - Hierarchy: 20%
+        # Note: Removed completeness - it duplicates token_coverage_bonus
+        # Then apply order bonus, adjacency bonus, and penalty multipliers
         hierarchy_score = 1.0 if hierarchy_valid else 0.0
         hierarchy_penalty_multiplier = 1.0 if hierarchy_valid else 0.5  # Hard penalty: ×0.5 for invalid
 
         combined_score = (
-            proximity_score * 0.45 +
-            base_score * 0.25 +
-            completeness * 0.10 +
+            proximity_score * 0.30 +
+            base_score * 0.50 +
             hierarchy_score * 0.20
-        ) * order_bonus * adjacency_bonus * hierarchy_penalty_multiplier * ward_disambiguation_penalty * token_similarity_penalty
+        ) * order_bonus * adjacency_bonus * hierarchy_penalty_multiplier * ward_disambiguation_penalty * token_similarity_penalty * fuzzy_quality_penalty
 
         # NEW: Direct Text Match Bonus
         # Give bonus to candidates whose district/ward appears in ORIGINAL text (before abbreviation expansion)
@@ -1682,7 +1718,8 @@ def adjust_scores_by_position(
 def extract_province_candidates(
     tokens: List[str],
     province_known: Optional[str] = None,
-    fuzzy_threshold: float = 0.90
+    fuzzy_threshold: float = 0.90,
+    delimiter_info: Optional[Dict] = None
 ) -> List[Tuple[str, float, str, bool]]:
     """
     Extract province candidates from multiple sources (mimics human reading).
@@ -1747,8 +1784,8 @@ def extract_province_candidates(
 
         # If not in rightmost, check full text (less common but possible)
         if not province_in_text:
-            all_ngrams = generate_ngrams(tokens, max_n=3)
-            for ngram, ngram_key, _ in all_ngrams:
+            all_ngrams = generate_ngrams(tokens, max_n=3, delimiter_info=delimiter_info)
+            for ngram, ngram_key, _, delimiter_score in all_ngrams:
                 if ngram.isdigit():
                     continue
 
@@ -1758,7 +1795,8 @@ def extract_province_candidates(
                     threshold=0.95,
                     level='province',
                     return_token_adjustments=True,
-                    ngram_token_positions=ngram_key
+                    ngram_token_positions=ngram_key,
+                    delimiter_score=delimiter_score
                 )
 
                 if match_results:
@@ -1808,17 +1846,28 @@ def extract_province_candidates(
     # Source 2: Rightmost tokens (last 1-3 words)
     # Vietnamese addresses typically end with province
     rightmost_ngrams = []
+
+    # Edge case: Check for 4-word province "ba ria vung tau" first
+    if len(tokens) >= 4:
+        four_gram_tokens = tokens[-4:]
+        four_gram_text = ' '.join(four_gram_tokens)
+        # Only add 4-gram if it looks like "ba ria vung tau"
+        if 'ba' in four_gram_tokens and 'ria' in four_gram_tokens and 'vung' in four_gram_tokens and 'tau' in four_gram_tokens:
+            four_gram_key = (len(tokens) - 4, len(tokens))
+            rightmost_ngrams.append((four_gram_text, four_gram_key))
+
     for n in range(min(3, len(tokens)), 0, -1):
         ngram_tokens = tokens[-n:]
         ngram_text = ' '.join(ngram_tokens)
         ngram_key = (len(tokens) - n, len(tokens))
         rightmost_ngrams.append((ngram_text, ngram_key))
 
+    from ..config import FUZZY_THRESHOLDS
     for ngram, ngram_key in rightmost_ngrams:
         match_results = match_in_set(
             ngram,
             province_set,
-            threshold=0.85,  # Balanced threshold (handles typos & spacing like "co nhue1")
+            threshold=FUZZY_THRESHOLDS['province'],
             level='province',
             return_token_adjustments=True,
             ngram_token_positions=ngram_key
@@ -1836,8 +1885,32 @@ def extract_province_candidates(
     # CHANGED: Always run full scan (not just when no rightmost match)
     # This ensures we find ALL exact matches in text
     # Deduplicate logic (line 1386) will handle duplicates
-    all_ngrams = generate_ngrams(tokens, max_n=3)
-    for ngram, ngram_key, _ in all_ngrams:
+
+    # Edge case: Check for 4-word province "ba ria vung tau" in full scan
+    if len(tokens) >= 4:
+        for i in range(len(tokens) - 3):
+            four_gram_tokens = tokens[i:i+4]
+            if 'ba' in four_gram_tokens and 'ria' in four_gram_tokens and 'vung' in four_gram_tokens and 'tau' in four_gram_tokens:
+                four_gram_text = ' '.join(four_gram_tokens)
+                four_gram_key = (i, i + 4)
+                match_results = match_in_set(
+                    four_gram_text,
+                    province_set,
+                    threshold=fuzzy_threshold,
+                    level='province',
+                    return_token_adjustments=True,
+                    ngram_token_positions=four_gram_key
+                )
+                for match_data in match_results:
+                    if len(match_data) == 3:
+                        match_name, match_score, token_pos = match_data
+                        candidates.append((match_name, match_score, 'full_scan', token_pos))
+                    else:
+                        match_name, match_score = match_data
+                        candidates.append((match_name, match_score, 'full_scan', four_gram_key))
+
+    all_ngrams = generate_ngrams(tokens, max_n=3, delimiter_info=delimiter_info)
+    for ngram, ngram_key, _, delimiter_score in all_ngrams:
         # Skip numeric tokens
         if ngram.isdigit():
             continue
@@ -1851,7 +1924,8 @@ def extract_province_candidates(
             threshold=fuzzy_threshold,
             level='province',
             return_token_adjustments=True,
-            ngram_token_positions=ngram_key
+            ngram_token_positions=ngram_key,
+            delimiter_score=delimiter_score
         )
         # NEW: match_in_set now returns list of tuples with token positions
         for match_data in match_results:
@@ -2068,8 +2142,9 @@ def extract_district_scoped(
                 # Bonus for numbers with keywords (e.g., "quan 3")
                 keyword_multiplier = NUMERIC_WITH_KEYWORD_BONUS
             else:
-                # Penalty for standalone numbers (e.g., just "3")
-                keyword_multiplier = NUMERIC_WITHOUT_KEYWORD_PENALTY
+                # Skip standalone numbers without keyword prefix (e.g., just "3")
+                # These are too ambiguous and should not match as district names
+                continue
 
         # Try abbreviation expansion first (with province context)
         from .text_utils import expand_abbreviations
@@ -2138,8 +2213,9 @@ def extract_district_scoped(
                     # Bonus for numbers with keywords (e.g., "quan 3")
                     keyword_multiplier = NUMERIC_WITH_KEYWORD_BONUS
                 else:
-                    # Penalty for standalone numbers (e.g., just "3")
-                    keyword_multiplier = NUMERIC_WITHOUT_KEYWORD_PENALTY
+                    # Skip standalone numbers without keyword prefix (e.g., just "3")
+                    # These are too ambiguous and should not match as district names
+                    continue
 
             # Try abbreviation expansion
             expanded = expand_abbreviations(ngram_text_normalized, use_db=True, province_context=province_context)
@@ -2247,14 +2323,17 @@ def extract_district_scoped(
                     if has_keyword:
                         keyword_multiplier = NUMERIC_WITH_KEYWORD_BONUS  # 1.2x
                     else:
-                        keyword_multiplier = NUMERIC_WITHOUT_KEYWORD_PENALTY  # 0.7x
+                        # Skip standalone numbers without keyword prefix (e.g., just "2")
+                        # These are too ambiguous and could be house numbers
+                        continue
 
                 # Try ward match (higher threshold since it's a fallback)
                 # CONTEXT-AWARE: No district context here (inherited), so has_district_context=False
+                from ..config import FUZZY_THRESHOLDS
                 match_results = match_in_set(
                     ngram_text_normalized,
                     wards_set,
-                    threshold=0.85,  # Balanced threshold (handles typos & spacing)
+                    threshold=FUZZY_THRESHOLDS['ward'],
                     province_filter=province_context,
                     level='ward',
                     has_district_context=False  # District is inherited/inferred, reduced substring bonus
@@ -2380,7 +2459,7 @@ def extract_ward_scoped(
     province_context: str,
     district_context: Optional[str],
     used_tokens: List[Tuple[int, int]],
-    fuzzy_threshold=0.85
+    fuzzy_threshold=0.90
 ) -> List[Tuple[str, float, str, Tuple[int, int]]]:
     """
     Extract ward candidates scoped to a specific district (or province if district unknown).
@@ -2571,8 +2650,9 @@ def extract_ward_scoped(
                     # Bonus for numbers with keywords (e.g., "phuong 1")
                     keyword_multiplier = NUMERIC_WITH_KEYWORD_BONUS
                 else:
-                    # Penalty for standalone numbers (e.g., just "1")
-                    keyword_multiplier = NUMERIC_WITHOUT_KEYWORD_PENALTY
+                    # Skip standalone numbers without keyword prefix (e.g., just "1")
+                    # These are too ambiguous and should not match as ward names
+                    continue
 
             # Fuzzy match with wards
             # SUBSTRING FIX: Request token adjustments for substring matches
@@ -2667,7 +2747,8 @@ def build_search_tree(
     province_known: Optional[str] = None,
     district_known: Optional[str] = None,
     max_branches: int = 5,
-    phase2_segments: list = None
+    phase2_segments: list = None,
+    delimiter_info: Optional[Dict] = None
 ) -> List[Dict]:
     """
     Build multi-branch search tree using hierarchical scoped search.
@@ -2724,8 +2805,9 @@ def build_search_tree(
     all_candidates = []
 
     # STEP 1: Extract province candidates
+    from ..config import FUZZY_THRESHOLDS
     logger.debug("\n[🔍 DEBUG]   [STEP 1] PROVINCE EXTRACTION")
-    province_candidates = extract_province_candidates(tokens, province_known, fuzzy_threshold=0.85)
+    province_candidates = extract_province_candidates(tokens, province_known, fuzzy_threshold=FUZZY_THRESHOLDS['province'], delimiter_info=delimiter_info)
     logger.debug(f"[🔍 DEBUG]   📤 Found {len(province_candidates)} province candidates")
     for i, candidate_data in enumerate(province_candidates[:3], 1):
         if len(candidate_data) == 5:
@@ -2793,7 +2875,7 @@ def build_search_tree(
             province_context=prov_name,
             province_tokens_used=prov_token_pos,
             district_known=district_known,
-            fuzzy_threshold=0.85,
+            fuzzy_threshold=FUZZY_THRESHOLDS['district'],
             allow_token_reuse=collision_override  # Allow reuse when collision detected
         )
 
@@ -2880,7 +2962,7 @@ def build_search_tree(
                     province_context=prov_name,
                     district_context=dist_name,
                     used_tokens=used_tokens,
-                    fuzzy_threshold=0.85
+                    fuzzy_threshold=0.90
                 )
 
             logger.debug(f"[🔍 DEBUG]   📤 Found {len(ward_candidates)} ward candidates")

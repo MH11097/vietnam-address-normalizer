@@ -4,7 +4,7 @@ Text processing utilities for address normalization.
 import re
 import unicodedata
 from functools import lru_cache
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 
 # Precompiled regex patterns for performance
@@ -474,3 +474,290 @@ def normalize_hint(text: str) -> str:
     result = strip_admin_prefixes(normalized)
 
     return result
+
+
+def tokenize_with_delimiter_info(
+    text: str,
+    delimiter_chars: List[str] = None,
+    slash_number_pattern: str = None
+) -> Dict[str, Any]:
+    """
+    Tokenize text while preserving delimiter boundary information.
+
+    This function is designed for delimiter-aware matching. When users include
+    delimiters in their input, they have clear intent about segment boundaries.
+
+    Args:
+        text: Input text (after basic normalization but before removing delimiters)
+        delimiter_chars: List of delimiter characters to detect (default from config)
+        slash_number_pattern: Regex pattern for address numbers with slash (default from config)
+
+    Returns:
+        Dictionary containing:
+        - 'tokens': List of token strings
+        - 'normalized_text': Text with delimiters replaced by spaces
+        - 'delimiter_positions': List of (char_index, delimiter_char) tuples
+        - 'segments': List of dicts with 'start_token', 'end_token' for each segment
+        - 'number_tokens': Set of token indices containing number/slash patterns
+        - 'has_delimiters': Boolean indicating if any delimiters were found
+
+    Example:
+        >>> result = tokenize_with_delimiter_info("P3, Q5, HCM")
+        >>> result['tokens']
+        ['p3', 'q5', 'hcm']
+        >>> result['segments']
+        [{'start_token': 0, 'end_token': 1}, {'start_token': 1, 'end_token': 2}, {'start_token': 2, 'end_token': 3}]
+
+        >>> result = tokenize_with_delimiter_info("55/2 Nguyen Trai")
+        >>> result['tokens']
+        ['55/2', 'nguyen', 'trai']
+        >>> result['number_tokens']
+        {0}
+    """
+    # Import config defaults
+    from ..config import (
+        DELIMITER_CHARS, SLASH_NUMBER_PATTERN, USE_DELIMITER_HINTS
+    )
+
+    if delimiter_chars is None:
+        delimiter_chars = DELIMITER_CHARS
+    if slash_number_pattern is None:
+        slash_number_pattern = SLASH_NUMBER_PATTERN
+
+    if not text or not isinstance(text, str):
+        return {
+            'tokens': [],
+            'normalized_text': '',
+            'delimiter_positions': [],
+            'segments': [],
+            'number_tokens': set(),
+            'has_delimiters': False
+        }
+
+    # Lowercase for consistency
+    text = text.lower().strip()
+
+    # Step 1: Find all number/slash patterns (e.g., "55/2") and protect them
+    number_slash_regex = re.compile(slash_number_pattern)
+    protected_tokens = {}  # placeholder -> original
+    placeholder_counter = [0]
+
+    def protect_number_slash(match):
+        placeholder = f"__NUM_SLASH_{placeholder_counter[0]}__"
+        protected_tokens[placeholder] = match.group(0)
+        placeholder_counter[0] += 1
+        return placeholder
+
+    # Protect number/slash patterns before processing delimiters
+    protected_text = number_slash_regex.sub(protect_number_slash, text)
+
+    # Step 2: Find delimiter positions in original text
+    delimiter_positions = []
+    for i, char in enumerate(text):
+        if char in delimiter_chars:
+            # Skip if this is part of a protected number/slash pattern
+            is_protected = False
+            for orig in protected_tokens.values():
+                if '/' in orig:
+                    # Check if this position falls within the original pattern
+                    orig_start = text.find(orig)
+                    if orig_start <= i < orig_start + len(orig):
+                        is_protected = True
+                        break
+
+            if not is_protected:
+                delimiter_positions.append((i, char))
+
+    has_delimiters = len(delimiter_positions) > 0
+
+    # Step 3: Replace delimiters with spaces (except protected patterns)
+    normalized_text = protected_text
+    for delim in delimiter_chars:
+        normalized_text = normalized_text.replace(delim, ' ')
+
+    # Normalize whitespace
+    normalized_text = WHITESPACE_PATTERN.sub(' ', normalized_text).strip()
+
+    # Step 4: Tokenize
+    tokens = normalized_text.split()
+
+    # Step 5: Restore protected number/slash patterns and track their token indices
+    number_tokens = set()
+    final_tokens = []
+    for i, token in enumerate(tokens):
+        if token in protected_tokens:
+            final_tokens.append(protected_tokens[token])
+            number_tokens.add(i)
+        else:
+            final_tokens.append(token)
+
+    # Rebuild normalized text with restored tokens
+    normalized_text = ' '.join(final_tokens)
+
+    # Step 6: Build segment information from delimiter positions
+    segments = []
+    if has_delimiters and final_tokens:
+        # Map delimiter positions to token boundaries
+        # We need to figure out which tokens are in which segment
+
+        # Rebuild text with spaces to map character positions to tokens
+        char_to_token = []  # For each char position, which token index?
+        token_idx = 0
+        char_idx = 0
+
+        for token in final_tokens:
+            for _ in token:
+                char_to_token.append(token_idx)
+                char_idx += 1
+            # Space after token (except last)
+            if token_idx < len(final_tokens) - 1:
+                char_to_token.append(-1)  # Space, no token
+                char_idx += 1
+            token_idx += 1
+
+        # Find which delimiters fall between which tokens
+        # Sort delimiter positions
+        sorted_delims = sorted(delimiter_positions, key=lambda x: x[0])
+
+        # Build segments based on delimiter positions
+        # Simple approach: split based on delimiter positions in original text
+        current_segment_start = 0
+
+        for delim_pos, _ in sorted_delims:
+            # Find the token that ends before this delimiter
+            # Use cumulative character count approach
+            cumulative_len = 0
+            end_token = 0
+
+            for idx, token in enumerate(final_tokens):
+                cumulative_len += len(token)
+                if cumulative_len >= delim_pos:
+                    end_token = idx + 1
+                    break
+                cumulative_len += 1  # Space
+
+            if end_token > current_segment_start:
+                segments.append({
+                    'start_token': current_segment_start,
+                    'end_token': end_token
+                })
+                current_segment_start = end_token
+
+        # Add final segment
+        if current_segment_start < len(final_tokens):
+            segments.append({
+                'start_token': current_segment_start,
+                'end_token': len(final_tokens)
+            })
+    else:
+        # No delimiters - entire text is one segment
+        if final_tokens:
+            segments.append({
+                'start_token': 0,
+                'end_token': len(final_tokens)
+            })
+
+    return {
+        'tokens': final_tokens,
+        'normalized_text': normalized_text,
+        'delimiter_positions': delimiter_positions,
+        'segments': segments,
+        'number_tokens': number_tokens,
+        'has_delimiters': has_delimiters
+    }
+
+
+def check_ngram_crosses_delimiter(
+    ngram_start: int,
+    ngram_end: int,
+    segments: List[Dict[str, int]]
+) -> bool:
+    """
+    Check if an n-gram crosses delimiter boundaries.
+
+    Args:
+        ngram_start: Start token index (inclusive)
+        ngram_end: End token index (exclusive)
+        segments: List of segment dicts with 'start_token' and 'end_token'
+
+    Returns:
+        True if the n-gram spans multiple segments (crosses delimiter boundary)
+
+    Example:
+        >>> segments = [{'start_token': 0, 'end_token': 2}, {'start_token': 2, 'end_token': 4}]
+        >>> check_ngram_crosses_delimiter(0, 2, segments)  # Within first segment
+        False
+        >>> check_ngram_crosses_delimiter(1, 3, segments)  # Crosses boundary
+        True
+    """
+    if not segments or len(segments) <= 1:
+        return False
+
+    # Find which segment(s) this n-gram overlaps with
+    overlapping_segments = 0
+
+    for segment in segments:
+        seg_start = segment['start_token']
+        seg_end = segment['end_token']
+
+        # Check if there's any overlap
+        if ngram_start < seg_end and ngram_end > seg_start:
+            overlapping_segments += 1
+
+    # If it overlaps with more than one segment, it crosses a boundary
+    return overlapping_segments > 1
+
+
+def calculate_delimiter_score(
+    ngram_start: int,
+    ngram_end: int,
+    delimiter_info: Dict[str, Any],
+    cross_penalty: float = None,
+    within_bonus: float = None
+) -> float:
+    """
+    Calculate delimiter-aware score multiplier for an n-gram.
+
+    Args:
+        ngram_start: Start token index (inclusive)
+        ngram_end: End token index (exclusive)
+        delimiter_info: Dictionary from tokenize_with_delimiter_info()
+        cross_penalty: Penalty multiplier when crossing boundaries (default from config)
+        within_bonus: Bonus multiplier when fully within segment (default from config)
+
+    Returns:
+        Score multiplier (1.0 = neutral, <1.0 = penalty, >1.0 = bonus)
+
+    Example:
+        >>> delimiter_info = tokenize_with_delimiter_info("P3, Q5, HCM")
+        >>> calculate_delimiter_score(0, 1, delimiter_info)  # P3 - within segment
+        1.10  # bonus
+        >>> calculate_delimiter_score(0, 2, delimiter_info)  # P3 Q5 - crosses boundary
+        0.85  # penalty
+    """
+    from ..config import (
+        USE_DELIMITER_HINTS, DELIMITER_CROSS_PENALTY, DELIMITER_WITHIN_BONUS
+    )
+
+    # If delimiter hints are disabled, return neutral score
+    if not USE_DELIMITER_HINTS:
+        return 1.0
+
+    # Use defaults from config if not provided
+    if cross_penalty is None:
+        cross_penalty = DELIMITER_CROSS_PENALTY
+    if within_bonus is None:
+        within_bonus = DELIMITER_WITHIN_BONUS
+
+    # If no delimiters in input, return neutral score
+    if not delimiter_info.get('has_delimiters', False):
+        return 1.0
+
+    segments = delimiter_info.get('segments', [])
+
+    # Check if n-gram crosses delimiter boundary
+    if check_ngram_crosses_delimiter(ngram_start, ngram_end, segments):
+        return cross_penalty
+    else:
+        # N-gram is fully within a segment - apply bonus
+        return within_bonus

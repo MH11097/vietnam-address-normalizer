@@ -107,24 +107,16 @@ def calculate_confidence_score(candidate: Dict[str, Any], normalized_text: str =
     else:
         proximity = 0.5  # Neutral for province-only
 
-    # Component 3: Completeness (20%)
-    if at_rule == 3:
-        completeness = 1.0
-    elif at_rule == 2:
-        completeness = 0.7
-    else:
-        completeness = 0.4
-
-    # Component 4: Hierarchy validation (10%)
+    # Component 3: Hierarchy validation (20%)
+    # Note: Removed completeness - it duplicates token_coverage_bonus
     hierarchy_valid = candidate.get('hierarchy_valid', False)
     hierarchy = 1.0 if hierarchy_valid else 0.0
 
     # Combined score
     combined = (
-        base_fuzzy * 0.4 +
+        base_fuzzy * 0.5 +
         proximity * 0.3 +
-        completeness * 0.2 +
-        hierarchy * 0.1
+        hierarchy * 0.2
     )
 
     # Apply source multiplier

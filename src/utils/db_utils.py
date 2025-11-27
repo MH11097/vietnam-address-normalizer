@@ -1296,7 +1296,7 @@ def get_new_addresses_for_old_ward(
         {'new_province': 'Thành phố Hà Nội', 'new_ward': 'Phường Ba Đình', 'note': 'Nhập toàn bộ'}
     """
     query = """
-        SELECT new_province, new_ward, note
+        SELECT DISTINCT new_province, new_ward, note
         FROM admin_division_migration
         WHERE old_province = ?
           AND old_district = ?
@@ -1337,7 +1337,7 @@ def get_new_addresses_for_old_district(
         15  # All wards from Quận Ba Đình → multiple new_ward destinations
     """
     query = """
-        SELECT new_province, new_ward, note
+        SELECT DISTINCT new_province, new_ward, note
         FROM admin_division_migration
         WHERE old_province = ?
           AND old_district = ?

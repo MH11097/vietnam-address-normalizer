@@ -13,7 +13,8 @@ from ..utils.text_utils import (
     expand_abbreviations,
     remove_vietnamese_accents,
     remove_special_chars,
-    finalize_normalization
+    finalize_normalization,
+    tokenize_with_delimiter_info
 )
 
 logger = logging.getLogger(__name__)
@@ -109,8 +110,20 @@ def preprocess(raw_address: str, province_known: str = None) -> Dict[str, Any]:
     if no_accent != expanded:
         logger.debug(f"  📝 Notes: Đã loại bỏ dấu cho matching")
 
-    # Step 4: Finalize normalization (remove special chars, lowercase, trim)
-    logger.debug("\n[PHASE 1.4] FINALIZE NORMALIZATION")
+    # Step 4: Extract delimiter information (before removing delimiters)
+    logger.debug("\n[PHASE 1.4] DELIMITER EXTRACTION")
+    logger.debug(f"  📥 Input: '{no_accent}'")
+    logger.debug("  🔧 Tác vụ: Trích xuất thông tin delimiter (commas, hyphens, underscores, slashes)")
+    delimiter_info = tokenize_with_delimiter_info(no_accent)
+    if delimiter_info['has_delimiters']:
+        logger.debug(f"  📤 Output: Found {len(delimiter_info['delimiter_positions'])} delimiters")
+        logger.debug(f"      - Segments: {len(delimiter_info['segments'])}")
+        logger.debug(f"      - Number tokens: {delimiter_info['number_tokens']}")
+    else:
+        logger.debug("  📤 Output: No delimiters found")
+
+    # Step 5: Finalize normalization (remove special chars, lowercase, trim)
+    logger.debug("\n[PHASE 1.5] FINALIZE NORMALIZATION")
     logger.debug(f"  📥 Input: '{no_accent}'")
     logger.debug("  🔧 Tác vụ: Loại bỏ ký tự đặc biệt, lowercase, normalize whitespace")
     normalized = finalize_normalization(no_accent, keep_separators=True)
@@ -129,6 +142,7 @@ def preprocess(raw_address: str, province_known: str = None) -> Dict[str, Any]:
         'expanded': expanded,
         'no_accent': no_accent,
         'normalized': normalized,
+        'delimiter_info': delimiter_info,
         'processing_time_ms': round(processing_time, 3)
     }
 
