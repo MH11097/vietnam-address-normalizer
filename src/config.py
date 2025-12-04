@@ -65,6 +65,7 @@ MATCH_TYPE_WEIGHTS = {
 GEOGRAPHIC_CONTEXT_BONUS = 1.1  # 10% bonus for matches within hint scope
 HIERARCHY_INVALID_PENALTY = 0.8  # 20% penalty for invalid hierarchy
 WARD_INHERIT_PENALTY = 0.85  # 15% penalty when district is inherited/inferred from ward (not explicit)
+DISTRICT_INHERIT_PENALTY = 0.85  # 15% penalty when province is inherited/inferred from district (not explicit)
 
 # Position-based scoring settings
 POSITION_PENALTY_FACTOR = 0.2  # 20% max penalty for tokens far from end (0.8x-1.0x)

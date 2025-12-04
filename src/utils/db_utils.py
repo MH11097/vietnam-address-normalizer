@@ -7,7 +7,7 @@ import time
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
 from functools import lru_cache
 
@@ -281,6 +281,49 @@ def expand_abbreviation_from_admin(
 
     result = query_one(query, tuple(params))
     return result['word'] if result else None
+
+
+def get_province_abbreviation_candidates(abbr: str) -> List[Tuple[str, str]]:
+    """
+    Get all province candidates that match an abbreviation.
+    Returns list of (province_normalized, key) tuples to create multiple branches.
+
+    This function is used during province extraction to handle ambiguous abbreviations
+    like "dn" which could mean "da nang" OR "dong nai".
+
+    Args:
+        abbr: Abbreviation key (normalized, e.g., "dn", "hcm")
+
+    Returns:
+        List of (province_name, abbr_key) tuples
+        Empty list if no matches found
+
+    Example:
+        >>> get_province_abbreviation_candidates('dn')
+        [('da nang', 'dn'), ('dong nai', 'dn')]
+
+        >>> get_province_abbreviation_candidates('hcm')
+        [('ho chi minh', 'hcm')]
+
+        >>> get_province_abbreviation_candidates('xyz')
+        []
+    """
+    if not abbr:
+        return []
+
+    abbr = abbr.lower().strip()
+
+    # Query abbreviations table for province-level (province_context=NULL)
+    query = """
+        SELECT word, key FROM abbreviations
+        WHERE key = ?
+        AND province_context IS NULL
+        AND district_context IS NULL
+        ORDER BY word
+    """
+
+    rows = query_all(query, (abbr,))
+    return [(row['word'], row['key']) for row in rows]
 
 
 @lru_cache(maxsize=1)
@@ -835,6 +878,33 @@ def infer_district_from_ward(province: str, ward: str) -> Optional[str]:
     """
     result = query_one(query, (province, ward))
     return result['district_name_normalized'] if result else None
+
+
+def infer_province_from_district(district: str) -> Optional[str]:
+    """
+    Infer province from district.
+    Used when district is found but province is missing in the input.
+
+    Args:
+        district: Normalized district name
+
+    Returns:
+        Normalized province name, or None if not found
+
+    Example:
+        >>> infer_province_from_district('hai ba trung')
+        'ha noi'
+        >>> infer_province_from_district('quan 1')
+        'ho chi minh'
+    """
+    query = """
+    SELECT DISTINCT province_name_normalized
+    FROM admin_divisions
+    WHERE district_name_normalized = ?
+    LIMIT 1
+    """
+    result = query_one(query, (district,))
+    return result['province_name_normalized'] if result else None
 
 
 def find_street_match(

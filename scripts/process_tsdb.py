@@ -284,7 +284,7 @@ def main():
     # Concatenate 4 columns as raw address (separated by comma)
     def concat_address(row):
         parts = []
-        for col in ['EOM_dia_chi_cleaned', 'EOM_phuong_cleaned', 'EOM_quan_cleaned', 'EOM_tinh_cleaned']:
+        for col in ['Dia_chi_TSDB',	'Duong',	'Phuong',	'Quan',	'Tinh']:
             val = row[col]
             if val and not pd.isna(val) and str(val).strip():
                 parts.append(str(val).strip())
@@ -295,7 +295,7 @@ def main():
 
     # Prepare data for processing
     row_data = [
-        (idx, row['raw_address'], row['EOM_dia_chi_cleaned'])
+        (idx, row['raw_address'], row['Dia_chi_TSDB'])
         for idx, row in df.iterrows()
     ]
 
@@ -324,10 +324,12 @@ def main():
 
     # Select only 4 EOM columns + 4 parsed columns
     output_columns = [
-        'EOM_dia_chi_cleaned',
-        'EOM_phuong_cleaned',
-        'EOM_quan_cleaned',
-        'EOM_tinh_cleaned',
+        'raw_address',
+        'Dia_chi_TSDB',
+        'Duong',
+        'Phuong',
+        'Quan',
+        'Tinh',
         'parsed_province',
         'parsed_district',
         'parsed_ward',

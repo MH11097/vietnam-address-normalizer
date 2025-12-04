@@ -92,11 +92,16 @@ def preprocess(raw_address: str, province_known: str = None) -> Dict[str, Any]:
         changed_chars = sum(1 for a, b in zip(raw_address, unicode_normalized) if a != b)
         logger.debug(f"  📝 Notes: Đã sửa {changed_chars} ký tự unicode")
 
-    # Step 2: Abbreviation expansion (with province context)
+    # Step 2: Abbreviation expansion (SKIP database abbreviations entirely)
+    # Do NOT use database abbreviations here - they include province-level abbreviations
+    # Province abbreviations are handled during province extraction (Phase 3)
+    # District/ward abbreviations are handled with context AFTER province is determined
+    # Only apply hardcoded structural patterns (P., Q., TP., etc.)
     logger.debug("\n[PHASE 1.2] ABBREVIATION EXPANSION")
     logger.debug(f"  📥 Input: '{unicode_normalized}'")
-    logger.debug(f"  🔧 Tác vụ: Mở rộng viết tắt (context: {province_normalized or 'None'})")
-    expanded = expand_abbreviations(unicode_normalized, province_context=province_normalized)
+    logger.debug(f"  🔧 Tác vụ: Mở rộng viết tắt (structural patterns only - NO database)")
+    logger.debug(f"  📝 Notes: Province/district/ward abbreviations handled in Phase 3 with context")
+    expanded = expand_abbreviations(unicode_normalized, use_db=False)
     logger.debug(f"  📤 Output: '{expanded}'")
     if expanded != unicode_normalized.lower():
         logger.debug(f"  📝 Notes: Đã mở rộng viết tắt (text đã thay đổi)")

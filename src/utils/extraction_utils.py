@@ -1843,7 +1843,47 @@ def extract_province_candidates(
         # This prevents false positives from province names appearing in the address text
         return adjusted_result
 
-    # Source 2: Rightmost tokens (last 1-3 words)
+    # Source 2: Abbreviation Expansion (before rightmost/full scan)
+    # Check tokens for province abbreviations that create multiple candidates
+    # Example: "dn" → both "da nang" and "dong nai" as separate branches
+    logger.debug("\n[ABBREVIATION] Checking for province abbreviations")
+
+    from .db_utils import get_province_abbreviation_candidates
+
+    # Check all single tokens for abbreviation matches
+    for i, token in enumerate(tokens):
+        # Skip very short tokens (< 2 chars) and numeric tokens
+        if len(token) < 2 or token.isdigit():
+            continue
+
+        # Query database for province abbreviations
+        abbr_matches = get_province_abbreviation_candidates(token)
+
+        if abbr_matches:
+            logger.debug(f"[ABBREVIATION] Token '{token}' at position {i} matches:")
+            for province_name, abbr_key in abbr_matches:
+                logger.debug(f"[ABBREVIATION]   - '{province_name}' (key: {abbr_key})")
+
+                # Rightmost tokens get higher scores (0.95), middle tokens get 0.85
+                position_score = 0.95 if i >= len(tokens) - 3 else 0.85
+                token_pos = (i, i + 1)
+                candidates.append((province_name, position_score, 'abbreviation', token_pos))
+
+    # Also check 2-token combinations for multi-word abbreviations
+    # Example: "ba ria" abbreviation for "ba ria vung tau"
+    for i in range(len(tokens) - 1):
+        two_token = f"{tokens[i]} {tokens[i+1]}"
+        abbr_matches = get_province_abbreviation_candidates(two_token)
+
+        if abbr_matches:
+            logger.debug(f"[ABBREVIATION] Bigram '{two_token}' at positions [{i}:{i+2}] matches:")
+            for province_name, abbr_key in abbr_matches:
+                logger.debug(f"[ABBREVIATION]   - '{province_name}' (key: {abbr_key})")
+                position_score = 0.95 if i >= len(tokens) - 3 else 0.85
+                token_pos = (i, i + 2)
+                candidates.append((province_name, position_score, 'abbreviation', token_pos))
+
+    # Source 3: Rightmost tokens (last 1-3 words)
     # Vietnamese addresses typically end with province
     rightmost_ngrams = []
 
@@ -1937,11 +1977,12 @@ def extract_province_candidates(
                 candidates.append((match_name, match_score, 'full_scan', ngram_key))
 
     # Remove duplicates (keep highest score for each province)
-    # Priority: known_and_in_text (1.2) > known (1.0) > rightmost/full_scan
+    # Priority: known_and_in_text (1.2) > known (1.0) > abbreviation > rightmost/full_scan
     unique_candidates = {}
     source_priority = {
-        'known_and_in_text': 3,
-        'known': 2,
+        'known_and_in_text': 4,  # Highest priority
+        'known': 3,
+        'abbreviation': 2,        # Medium-high priority
         'rightmost': 1,
         'full_scan': 0
     }
@@ -2112,6 +2153,38 @@ def extract_district_scoped(
     # Try from longest to shortest (3-gram → 2-gram → 1-gram)
     from ..config import NUMERIC_WITHOUT_KEYWORD_PENALTY, NUMERIC_WITH_KEYWORD_BONUS, ADMIN_KEYWORDS_FULL
 
+    # Edge case: Check for 4-word district "phan rang thap cham" first
+    if len(available_tokens) >= 4:
+        four_gram_data = available_tokens[-4:]
+        four_gram_tokens = [t for _, t in four_gram_data]
+        # Only add 4-gram if it matches "phan rang thap cham"
+        if ('phan' in four_gram_tokens and 'rang' in four_gram_tokens and
+            'thap' in four_gram_tokens and 'cham' in four_gram_tokens):
+            four_gram_text = ' '.join(four_gram_tokens)
+            start_idx = four_gram_data[0][0]
+            end_idx = four_gram_data[-1][0] + 1
+
+            # Check if preceded by admin keyword
+            has_keyword = False
+            if len(available_tokens) > 4:
+                prev_token = clean_token(available_tokens[-5][1])
+                has_keyword = prev_token in ADMIN_KEYWORDS_FULL
+
+            # Try fuzzy match with 4-gram
+            match_results = match_in_set(
+                four_gram_text,
+                districts_set,
+                threshold=fuzzy_threshold,
+                province_filter=province_context,
+                level='district',
+                return_token_adjustments=True,
+                ngram_token_positions=(start_idx, end_idx)
+            )
+            for match_data in match_results:
+                match_name, match_score = match_data[0], match_data[1]
+                token_positions = match_data[2] if len(match_data) > 2 else (start_idx, end_idx)
+                candidates.append((match_name, match_score, 'fuzzy', token_positions))
+
     for n in range(min(3, len(available_tokens)), 0, -1):
         # Get last n available tokens
         last_n_tokens = available_tokens[-n:]
@@ -2181,6 +2254,39 @@ def extract_district_scoped(
     # CHANGED: Always run full scan (not just when no rightmost match)
     # This ensures we find ALL exact matches in text (e.g., "THANH CHUONG" + "VINH")
     # Deduplicate logic (line 1625) will handle duplicates if same match found in both sources
+
+    # Edge case: Check for 4-word district "phan rang thap cham" in full scan
+    if len(available_tokens) >= 4:
+        for i in range(len(available_tokens) - 3):
+            four_gram_data = available_tokens[i:i+4]
+            four_gram_tokens = [t for _, t in four_gram_data]
+            if ('phan' in four_gram_tokens and 'rang' in four_gram_tokens and
+                'thap' in four_gram_tokens and 'cham' in four_gram_tokens):
+                four_gram_text = ' '.join(four_gram_tokens)
+                start_idx = four_gram_data[0][0]
+                end_idx = four_gram_data[-1][0] + 1
+
+                # Check if preceded by admin keyword
+                has_keyword = False
+                if i > 0:
+                    prev_token = clean_token(available_tokens[i-1][1])
+                    has_keyword = prev_token in ADMIN_KEYWORDS_FULL
+
+                # Try fuzzy match
+                match_results = match_in_set(
+                    four_gram_text,
+                    districts_set,
+                    threshold=fuzzy_threshold,
+                    province_filter=province_context,
+                    level='district',
+                    return_token_adjustments=True,
+                    ngram_token_positions=(start_idx, end_idx)
+                )
+                for match_data in match_results:
+                    match_name, match_score = match_data[0], match_data[1]
+                    token_positions = match_data[2] if len(match_data) > 2 else (start_idx, end_idx)
+                    candidates.append((match_name, match_score, 'fuzzy', token_positions))
+
     for i, (token_idx, token) in enumerate(available_tokens):
         # Try n-grams starting from this position
         for n in range(min(3, len(available_tokens) - i), 0, -1):
@@ -2808,6 +2914,42 @@ def build_search_tree(
     from ..config import FUZZY_THRESHOLDS
     logger.debug("\n[🔍 DEBUG]   [STEP 1] PROVINCE EXTRACTION")
     province_candidates = extract_province_candidates(tokens, province_known, fuzzy_threshold=FUZZY_THRESHOLDS['province'], delimiter_info=delimiter_info)
+
+    # Apply penalty to abbreviations if exact matches exist
+    # This prevents "dn" from overshadowing "da nang" if both appear in text
+    if province_candidates:
+        has_exact_match = any(source in ['exact', 'rightmost', 'known_and_in_text']
+                             for _, _, source, _, _ in province_candidates)
+
+        if has_exact_match:
+            # Adjust abbreviation scores downward if exact matches exist
+            adjusted_candidates = []
+            for candidate_data in province_candidates:
+                if len(candidate_data) == 5:
+                    prov_name, prov_score, prov_source, has_collision, token_pos = candidate_data
+                elif len(candidate_data) == 4:
+                    prov_name, prov_score, prov_source, has_collision = candidate_data
+                    token_pos = None
+                else:
+                    prov_name, prov_score, prov_source = candidate_data
+                    has_collision = False
+                    token_pos = None
+
+                if prov_source == 'abbreviation':
+                    # Apply 10% penalty to abbreviations when exact matches exist
+                    adjusted_score = prov_score * 0.90
+                    logger.debug(f"[ABBREVIATION] Applied penalty to '{prov_name}': {prov_score:.3f} → {adjusted_score:.3f}")
+                    if token_pos is not None:
+                        adjusted_candidates.append((prov_name, adjusted_score, prov_source, has_collision, token_pos))
+                    else:
+                        adjusted_candidates.append((prov_name, adjusted_score, prov_source, has_collision))
+                else:
+                    adjusted_candidates.append(candidate_data)
+
+            province_candidates = adjusted_candidates
+            # Re-sort by score
+            province_candidates.sort(key=lambda x: x[1], reverse=True)
+
     logger.debug(f"[🔍 DEBUG]   📤 Found {len(province_candidates)} province candidates")
     for i, candidate_data in enumerate(province_candidates[:3], 1):
         if len(candidate_data) == 5:
@@ -2819,8 +2961,164 @@ def build_search_tree(
         logger.debug(f"[🔍 DEBUG]      {i}. '{name}' (score: {score:.3f}, source: {source}){collision_marker}")
 
     if not province_candidates:
-        # No province found - return empty
-        return []
+        # FALLBACK: No province found - try finding district and infer province
+        # Similar to ward → district inference logic
+        logger.debug("\n[🔍 DEBUG]   [STEP 1 FALLBACK] No province found - searching for district to infer province")
+
+        from .db_utils import infer_province_from_district, get_district_set
+        from ..config import DISTRICT_INHERIT_PENALTY
+
+        # Get all districts (not scoped to province since we don't have province yet)
+        districts_set = get_district_set()
+        logger.debug(f"[🔍 DEBUG]   Total districts in database: {len(districts_set)}")
+
+        # Search for district in tokens
+        district_candidates = []
+
+        # Try rightmost tokens first (most common position for district)
+        # Edge case: Check for 4-word district "phan rang thap cham" first
+        if len(tokens) >= 4:
+            four_gram_tokens = tokens[-4:]
+            # Only add 4-gram if it matches "phan rang thap cham"
+            if ('phan' in four_gram_tokens and 'rang' in four_gram_tokens and
+                'thap' in four_gram_tokens and 'cham' in four_gram_tokens):
+                four_gram_text = ' '.join(four_gram_tokens)
+                four_gram_key = (len(tokens) - 4, len(tokens))
+
+                # Try exact match
+                if four_gram_text in districts_set:
+                    district_candidates.append((four_gram_text, 1.0, 'exact', four_gram_key))
+                    logger.debug(f"[INFERENCE] Found district '{four_gram_text}' via exact match (4-token)")
+
+                # Try fuzzy match
+                match_results = match_in_set(
+                    four_gram_text,
+                    districts_set,
+                    threshold=FUZZY_THRESHOLDS['district'],
+                    level='district'
+                )
+                for match_name, match_score in match_results:
+                    district_candidates.append((match_name, match_score, 'fuzzy_4token', four_gram_key))
+                    logger.debug(f"[INFERENCE] Found district '{match_name}' via fuzzy match (4-token, score: {match_score:.3f})")
+
+        for n in range(min(3, len(tokens)), 0, -1):
+            ngram_tokens = tokens[-n:]
+            ngram_text = ' '.join(ngram_tokens)
+            ngram_key = (len(tokens) - n, len(tokens))
+
+            # Try exact match
+            if ngram_text in districts_set:
+                district_candidates.append((ngram_text, 1.0, 'exact', ngram_key))
+                logger.debug(f"[INFERENCE] Found district '{ngram_text}' via exact match")
+
+            # Try fuzzy match
+            match_results = match_in_set(
+                ngram_text,
+                districts_set,
+                threshold=FUZZY_THRESHOLDS['district'],
+                level='district'
+            )
+            for match_name, match_score in match_results:
+                district_candidates.append((match_name, match_score, 'fuzzy', ngram_key))
+                logger.debug(f"[INFERENCE] Found district '{match_name}' via fuzzy match (score: {match_score:.3f})")
+
+        # Also try full scan if rightmost didn't find anything
+        if not district_candidates:
+            logger.debug("[INFERENCE] No district found in rightmost tokens - trying full scan")
+
+            # Edge case: Check for 4-word district "phan rang thap cham" in full scan
+            if len(tokens) >= 4:
+                for i in range(len(tokens) - 3):
+                    four_gram_tokens = tokens[i:i+4]
+                    if ('phan' in four_gram_tokens and 'rang' in four_gram_tokens and
+                        'thap' in four_gram_tokens and 'cham' in four_gram_tokens):
+                        four_gram_text = ' '.join(four_gram_tokens)
+                        four_gram_key = (i, i + 4)
+
+                        # Try fuzzy match
+                        match_results = match_in_set(
+                            four_gram_text,
+                            districts_set,
+                            threshold=FUZZY_THRESHOLDS['district'],
+                            level='district'
+                        )
+                        for match_name, match_score in match_results:
+                            district_candidates.append((match_name, match_score, 'fuzzy_full_scan_4token', four_gram_key))
+                            logger.debug(f"[INFERENCE] Found district '{match_name}' via full scan (4-token, score: {match_score:.3f})")
+
+            for i in range(len(tokens)):
+                for n in range(min(3, len(tokens) - i), 0, -1):
+                    ngram_tokens = tokens[i:i+n]
+                    ngram_text = ' '.join(ngram_tokens)
+                    ngram_key = (i, i + n)
+
+                    # Skip if numeric or too short
+                    if ngram_text.isdigit() or len(ngram_text) < 3:
+                        continue
+
+                    # Try fuzzy match
+                    match_results = match_in_set(
+                        ngram_text,
+                        districts_set,
+                        threshold=FUZZY_THRESHOLDS['district'],
+                        level='district'
+                    )
+                    for match_name, match_score in match_results:
+                        district_candidates.append((match_name, match_score, 'fuzzy_full_scan', ngram_key))
+                        logger.debug(f"[INFERENCE] Found district '{match_name}' via full scan (score: {match_score:.3f})")
+
+        # Remove duplicates and sort by score
+        unique_districts = {}
+        for dist, score, source, pos in district_candidates:
+            if dist not in unique_districts or score > unique_districts[dist][0]:
+                unique_districts[dist] = (score, source, pos)
+
+        district_candidates = [(dist, score, source, pos) for dist, (score, source, pos) in unique_districts.items()]
+        district_candidates.sort(key=lambda x: x[1], reverse=True)
+
+        logger.debug(f"[INFERENCE] Found {len(district_candidates)} unique district candidate(s)")
+
+        # For each district found, infer province
+        inferred_province_candidates = []
+        for dist_name, dist_score, dist_source, dist_pos in district_candidates[:5]:  # Limit to top 5 districts
+            logger.debug(f"[INFERENCE] Inferring province from district '{dist_name}'...")
+            inferred_province = infer_province_from_district(dist_name)
+
+            if inferred_province:
+                logger.debug(f"[INFERENCE] ✓ Inferred province '{inferred_province}' from district '{dist_name}'")
+
+                # Apply district inherit penalty to province score
+                province_score = dist_score * DISTRICT_INHERIT_PENALTY
+
+                # Store district metadata so we can reuse it later
+                district_metadata = {
+                    'district_name': dist_name,
+                    'district_score': dist_score,
+                    'district_source': dist_source,
+                    'district_tokens': dist_pos
+                }
+
+                # Add to province candidates with special source
+                # Format: (province, score, source, has_collision, token_pos, district_metadata)
+                inferred_province_candidates.append((
+                    inferred_province,
+                    province_score,
+                    f'inferred_from_district_{dist_source}',
+                    False,  # has_collision
+                    None,   # province token_pos (not in text)
+                    district_metadata
+                ))
+            else:
+                logger.debug(f"[INFERENCE] ✗ Could not infer province from district '{dist_name}'")
+
+        if not inferred_province_candidates:
+            # Still no province found - return empty
+            logger.debug("[🔍 DEBUG]   No province found even after district inference - returning empty")
+            return []
+
+        # Use inferred provinces as province_candidates
+        province_candidates = inferred_province_candidates
+        logger.debug(f"[🔍 DEBUG]   Using {len(province_candidates)} inferred province candidate(s)")
 
     # STEP 2: For each province candidate → Search district
     # Process ALL province candidates (not just first one) to check both interpretations
@@ -2828,13 +3126,21 @@ def build_search_tree(
     # PRIORITY FIX: When collision detected (province name == district name), prioritize district interpretation
     logger.debug(f"\n[🔍 DEBUG]   [STEP 2] DISTRICT EXTRACTION (foreach province)")
     for idx, candidate_data in enumerate(province_candidates[:max_branches], 1):
-        if len(candidate_data) == 5:
+        # Handle both standard format and inferred format (with district metadata)
+        district_metadata = None
+        if len(candidate_data) == 6:
+            # Inferred from district: (province, score, source, has_collision, token_pos, district_metadata)
+            prov_name, prov_score, prov_source, has_collision, prov_token_pos_from_match, district_metadata = candidate_data
+        elif len(candidate_data) == 5:
             prov_name, prov_score, prov_source, has_collision, prov_token_pos_from_match = candidate_data
         else:
             prov_name, prov_score, prov_source, has_collision = candidate_data
             prov_token_pos_from_match = None
 
         logger.debug(f"\n[🔍 DEBUG]   ─── Province {idx}/{min(len(province_candidates), max_branches)}: '{prov_name}' ───")
+        if district_metadata:
+            logger.debug(f"[DISTRICT_REUSE] Province '{prov_name}' was inferred from district '{district_metadata['district_name']}'")
+            logger.debug(f"[DISTRICT_REUSE] Skipping district search - using inferred district directly")
 
         # Determine province token position
         # If known-only (not in text), position is (-1, -1)
@@ -2870,14 +3176,27 @@ def build_search_tree(
             logger.debug(f"[⚠️ COLLISION] Allowing district search to reuse province tokens")
 
         # Extract district candidates for this province
-        district_candidates = extract_district_scoped(
-            tokens,
-            province_context=prov_name,
-            province_tokens_used=prov_token_pos,
-            district_known=district_known,
-            fuzzy_threshold=FUZZY_THRESHOLDS['district'],
-            allow_token_reuse=collision_override  # Allow reuse when collision detected
-        )
+        # SPECIAL CASE: If province was inferred from district, reuse that district
+        if district_metadata:
+            # Reuse the district that was used to infer the province
+            dist_name = district_metadata['district_name']
+            dist_score = district_metadata['district_score']
+            dist_source = district_metadata['district_source']
+            dist_pos = district_metadata['district_tokens']
+
+            # Create single district candidate from metadata
+            district_candidates = [(dist_name, dist_score, f'reused_from_inference_{dist_source}', dist_pos)]
+            logger.debug(f"[DISTRICT_REUSE] Using district '{dist_name}' (score: {dist_score:.3f}) from province inference")
+        else:
+            # Normal case: extract district candidates from tokens
+            district_candidates = extract_district_scoped(
+                tokens,
+                province_context=prov_name,
+                province_tokens_used=prov_token_pos,
+                district_known=district_known,
+                fuzzy_threshold=FUZZY_THRESHOLDS['district'],
+                allow_token_reuse=collision_override  # Allow reuse when collision detected
+            )
 
         logger.debug(f"[🔍 DEBUG]   📤 Found {len(district_candidates)} district candidates")
         for i, candidate in enumerate(district_candidates[:3], 1):

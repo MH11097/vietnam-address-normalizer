@@ -14,14 +14,15 @@ NUMBER_PATTERN = re.compile(r'\d+')
 
 # Common abbreviation patterns (hardcoded for basic expansion)
 # Only expand when followed by number or at word boundary
+# NOTE: Province abbreviations (hn, hcm, dn) are handled via database lookup in extraction phase
 COMMON_ABBREVIATION_PATTERNS = [
     (re.compile(r'\bf\s*\.?\s*(?=\d)', re.IGNORECASE), 'phuong '),
     (re.compile(r'\bp\s*\.?\s*(?=\d)', re.IGNORECASE), 'phuong '),
     (re.compile(r'\bq\s*\.?\s*(?=\d)', re.IGNORECASE), 'quan '),
     (re.compile(r'\btp\.?\s+', re.IGNORECASE), 'thanh pho '),
     (re.compile(r'\bt\.?p\.?\s+', re.IGNORECASE), 'thanh pho '),
-    (re.compile(r'\bhn\b', re.IGNORECASE), 'ha noi'),
-    (re.compile(r'\bhcm\b', re.IGNORECASE), 'ho chi minh'),
+    # Removed: (re.compile(r'\bhn\b', re.IGNORECASE), 'ha noi'),
+    # Removed: (re.compile(r'\bhcm\b', re.IGNORECASE), 'ho chi minh'),
 ]
 
 # Database abbreviations (loaded lazily)
