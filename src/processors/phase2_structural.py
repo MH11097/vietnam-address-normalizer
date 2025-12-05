@@ -106,7 +106,9 @@ def structural_parse(
     # Tier 1: Comma-separated parsing (highest confidence)
     if ',' in normalized_address:
         result = parse_comma_separated(normalized_address, province_known, district_known)
-        if result['confidence'] > 0:
+        # Always return result if has_structure (even if confidence=0)
+        # Phase 3 will use segment_boundaries for scoring
+        if result.get('has_structure'):
             result['processing_time_ms'] = (time.time() - start_time) * 1000
             result['delimiter_info'] = delimiter_info
             return result
@@ -116,10 +118,14 @@ def structural_parse(
         # Replace dash with comma and reuse comma parser
         normalized_dash = normalized_address.replace(' - ', ',').replace('-', ',')
         result = parse_comma_separated(normalized_dash, province_known, district_known)
-        if result['confidence'] > 0:
+        if result.get('has_structure'):
             result['method'] = 'dash_keyword'
             result['processing_time_ms'] = (time.time() - start_time) * 1000
             result['delimiter_info'] = delimiter_info
+            # Recalculate boundaries with dash as delimiter
+            result['segment_boundaries'] = calculate_segment_boundaries(
+                normalized_address, delimiter_chars=['-', ' - ']
+            )
             return result
 
     # Tier 1c: Underscore-separated parsing (treat like comma)
@@ -127,10 +133,14 @@ def structural_parse(
         # Replace underscore with comma and reuse comma parser
         normalized_underscore = normalized_address.replace('_', ',')
         result = parse_comma_separated(normalized_underscore, province_known, district_known)
-        if result['confidence'] > 0:
+        if result.get('has_structure'):
             result['method'] = 'underscore_keyword'
             result['processing_time_ms'] = (time.time() - start_time) * 1000
             result['delimiter_info'] = delimiter_info
+            # Recalculate boundaries with underscore as delimiter
+            result['segment_boundaries'] = calculate_segment_boundaries(
+                normalized_address, delimiter_chars=['_']
+            )
             return result
 
     # No delimiter found - return confidence=0 to trigger n-gram fallback (Phase 3)
@@ -144,6 +154,7 @@ def _empty_result(processing_time_ms: float, delimiter_info: Optional[Dict[str, 
         'method': 'none',
         'confidence': 0,
         'segments': [],
+        'segment_boundaries': [],  # NEW: Empty boundaries when no structure
         'has_structure': False,
         'delimiter_info': delimiter_info,
         'processing_time_ms': round(processing_time_ms, 3)
@@ -153,6 +164,56 @@ def _empty_result(processing_time_ms: float, delimiter_info: Optional[Dict[str, 
 # ============================================================================
 # TIER 1: COMMA-SEPARATED PARSER
 # ============================================================================
+
+def calculate_segment_boundaries(
+    normalized_address: str,
+    delimiter_chars: List[str] = None
+) -> List[Tuple[int, int]]:
+    """
+    Calculate token index boundaries for each segment.
+    
+    Args:
+        normalized_address: Full normalized text (e.g., "xa yen ho, duc tho, ha tinh")
+        delimiter_chars: List of delimiter characters to split on
+    
+    Returns:
+        List of (start_idx, end_idx) tuples for each segment
+    
+    Example:
+        Input: "xa yen ho, duc tho, ha tinh"
+        Output: [(0, 3), (3, 5), (5, 7)]
+               segment 0: tokens[0:3] = "xa yen ho"
+               segment 1: tokens[3:5] = "duc tho"  
+               segment 2: tokens[5:7] = "ha tinh"
+    """
+    if delimiter_chars is None:
+        delimiter_chars = [',', '-', '_']
+    
+    # Check if any delimiter exists
+    has_delimiter = any(d in normalized_address for d in delimiter_chars)
+    
+    if not has_delimiter:
+        # No delimiters → single segment covering all tokens
+        tokens = normalized_address.split()
+        return [(0, len(tokens))]
+    
+    # Split by all delimiters using regex
+    pattern = '|'.join(re.escape(d) for d in delimiter_chars)
+    segments = re.split(pattern, normalized_address)
+    segments = [s.strip() for s in segments if s.strip()]
+    
+    boundaries = []
+    current_pos = 0
+    
+    for seg in segments:
+        seg_tokens = seg.split()
+        seg_len = len(seg_tokens)
+        if seg_len > 0:  # Only add non-empty segments
+            boundaries.append((current_pos, current_pos + seg_len))
+            current_pos += seg_len
+    
+    return boundaries
+
 
 def parse_comma_separated(
     address: str,
@@ -170,6 +231,7 @@ def parse_comma_separated(
        - Position (later segments = higher boost)
        - Delimiter presence (comma/dash): +0.15 base
     4. Return segments with scores for Phase 3 to validate with DB
+    5. NEW: Return segment_boundaries for n-gram containment scoring
 
     Example:
         "xa yen ho, duc tho" →
@@ -177,6 +239,7 @@ def parse_comma_separated(
             {'text': 'yen ho', 'keyword': 'xa', 'position': 0, 'boost': 0.3},
             {'text': 'duc tho', 'keyword': None, 'position': 1, 'boost': 0.15}
         ]
+        segment_boundaries = [(0, 3), (3, 5)]
         → Phase 3 validates with DB and picks valid matches
 
     Args:
@@ -185,14 +248,17 @@ def parse_comma_separated(
         district_known: Known district (optional)
 
     Returns:
-        Segments with boost scores (confidence always 0 to trigger Phase 3)
+        Segments with boost scores and segment_boundaries for containment scoring
     """
 
     # Split by comma and clean
     segments = [s.strip() for s in address.split(',') if s.strip()]
 
     if not segments:
-        return {'method': 'none', 'confidence': 0, 'segments': []}
+        return {'method': 'none', 'confidence': 0, 'segments': [], 'segment_boundaries': []}
+
+    # Calculate segment boundaries for n-gram containment scoring
+    segment_boundaries = calculate_segment_boundaries(address, delimiter_chars=[','])
 
     # Parse each segment to extract keyword and calculate boost
     scored_segments = []
@@ -226,6 +292,7 @@ def parse_comma_separated(
         'method': 'comma_keyword',
         'confidence': 0,  # Always 0 → Always run Phase 3 for DB validation
         'segments': scored_segments,
+        'segment_boundaries': segment_boundaries,  # NEW: For n-gram containment scoring
         'has_structure': True
     }
 

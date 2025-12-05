@@ -459,37 +459,34 @@ def expand_tokens_with_context(
 def generate_ngrams(
     tokens: List[str],
     max_n: int = 4,
-    delimiter_info: Optional[Dict] = None
+    delimiter_info: Optional[Dict] = None,
+    segment_boundaries: Optional[List[Tuple[int, int]]] = None
 ) -> List[Tuple[str, Tuple[int, int], bool, float]]:
     """
-    Generate n-grams from tokens (1-gram to max_n-gram) with delimiter-aware scoring.
-    Returns list of (ngram_text, (start_idx, end_idx), has_keyword, delimiter_score)
+    Generate n-grams from tokens (1-gram to max_n-gram) with delimiter-aware and segment-aware scoring.
+    Returns list of (ngram_text, (start_idx, end_idx), has_keyword, combined_score)
 
     Args:
         tokens: List of word tokens
         max_n: Maximum n-gram size (default: 4)
         delimiter_info: Optional delimiter information from tokenization (for scoring)
+        segment_boundaries: Optional list of (start, end) token indices for each segment
+                           N-grams fully within a segment get bonus, cross-boundary get penalty
 
     Returns:
-        List of (ngram_string, (start_index, end_index), has_admin_keyword, delimiter_score) tuples
+        List of (ngram_string, (start_index, end_index), has_admin_keyword, combined_score) tuples
         Sorted by n descending (longer phrases first)
         has_admin_keyword: True if the token immediately before this n-gram is an admin keyword
-        delimiter_score: Multiplier based on delimiter boundaries (1.0=neutral, <1.0=penalty, >1.0=bonus)
+        combined_score: Multiplier combining delimiter_score and segment_score
 
     Example:
-        >>> generate_ngrams(['phuong', '1', 'quan', '3'], max_n=2)
-        [('phuong 1 quan 3', (0, 4), False, 1.0),  # 4-gram
-         ('phuong 1 quan', (0, 3), False, 1.0),     # 3-gram
-         ('1 quan 3', (1, 4), True, 0.85),           # 3-gram (crosses delimiter, penalty)
-         ('phuong 1', (0, 2), False, 1.1),          # 2-gram (within segment, bonus)
-         ('1 quan', (1, 3), True, 0.85),             # 2-gram (crosses delimiter)
-         ('quan 3', (2, 4), False, 1.1),            # 2-gram (within segment)
-         ('phuong', (0, 1), False, 1.1),            # 1-gram
-         ('1', (1, 2), True, 1.1),                  # 1-gram
-         ('quan', (2, 3), False, 1.1),              # 1-gram
-         ('3', (3, 4), True, 1.1)]                  # 1-gram
+        >>> # With segment_boundaries = [(0, 3), (3, 5)]  (from "xa yen ho, duc tho")
+        >>> generate_ngrams(['xa', 'yen', 'ho', 'duc', 'tho'], segment_boundaries=[(0,3),(3,5)])
+        [('yen ho', (1, 3), False, 1.2),     # Within segment 0 → +20% bonus
+         ('duc tho', (3, 5), False, 1.2),    # Within segment 1 → +20% bonus
+         ('ho duc', (2, 4), False, 0.85)]    # Crosses boundary → -15% penalty
     """
-    from ..config import DEBUG_NGRAMS, ADMIN_KEYWORDS_FULL
+    from ..config import DEBUG_NGRAMS, ADMIN_KEYWORDS_FULL, SEGMENT_CONTAINMENT_BONUS, SEGMENT_CROSS_PENALTY
     from .text_utils import calculate_delimiter_score
 
     if not tokens:
@@ -520,7 +517,15 @@ def generate_ngrams(
                     delimiter_info=delimiter_info
                 )
 
-            ngrams.append((ngram_text, (i, i+n), has_keyword, delimiter_score))
+            # NEW: Calculate segment containment score
+            segment_score = 1.0  # Default neutral
+            if segment_boundaries:
+                segment_score = calculate_segment_score(i, i+n, segment_boundaries)
+
+            # Combine scores (multiplicative)
+            combined_score = delimiter_score * segment_score
+
+            ngrams.append((ngram_text, (i, i+n), has_keyword, combined_score))
 
     if DEBUG_NGRAMS:
         logger.debug(f"[NGRAMS] Generated {len(ngrams)} n-grams from {len(tokens)} tokens (max_n={max_n})")
@@ -535,8 +540,51 @@ def generate_ngrams(
         # Log delimiter info if present
         if delimiter_info and delimiter_info.get('has_delimiters'):
             logger.debug(f"[NGRAMS]   Delimiter-aware: {len(delimiter_info['segments'])} segments detected")
+        
+        # Log segment boundaries if present
+        if segment_boundaries:
+            logger.debug(f"[NGRAMS]   Segment-aware: {len(segment_boundaries)} segments: {segment_boundaries}")
 
     return ngrams
+
+
+def calculate_segment_score(
+    start: int,
+    end: int,
+    segment_boundaries: List[Tuple[int, int]]
+) -> float:
+    """
+    Calculate score multiplier based on segment containment.
+    
+    Args:
+        start: N-gram start token index
+        end: N-gram end token index  
+        segment_boundaries: List of (seg_start, seg_end) from Phase 2
+    
+    Returns:
+        SEGMENT_CONTAINMENT_BONUS (1.20) if fully within one segment
+        SEGMENT_CROSS_PENALTY (0.85) if crosses any boundary
+        1.0 if edge case / can't determine
+    
+    Example:
+        segment_boundaries = [(0, 3), (3, 5), (5, 7)]
+        
+        calculate_segment_score(1, 3, ...) → 1.20  # "yen ho" within segment 0
+        calculate_segment_score(2, 4, ...) → 0.85  # "ho duc" crosses boundary at 3
+    """
+    from ..config import SEGMENT_CONTAINMENT_BONUS, SEGMENT_CROSS_PENALTY
+    
+    if not segment_boundaries:
+        return 1.0
+    
+    # Check if n-gram is fully contained within any single segment
+    for seg_start, seg_end in segment_boundaries:
+        if start >= seg_start and end <= seg_end:
+            # N-gram fully within this segment → BONUS
+            return SEGMENT_CONTAINMENT_BONUS
+    
+    # N-gram spans multiple segments → PENALTY
+    return SEGMENT_CROSS_PENALTY
 
 
 def match_in_set(
@@ -844,7 +892,8 @@ def extract_with_database(
     district_known: Optional[str] = None,
     original_text_for_matching: Optional[str] = None,
     phase2_segments: list = None,
-    delimiter_info: Optional[Dict] = None
+    delimiter_info: Optional[Dict] = None,
+    segment_boundaries: Optional[List[Tuple[int, int]]] = None  # NEW: From Phase 2
 ) -> Dict:
     """
     Extract province/district/ward using hierarchical scoped search.
@@ -864,6 +913,8 @@ def extract_with_database(
         district_known: Known district from raw data (optional, trusted 100%)
         original_text_for_matching: Original text before abbreviation expansion (for direct match bonus)
         phase2_segments: Segments with boost scores from Phase 2 (optional)
+        delimiter_info: Delimiter info from Phase 1 (optional)
+        segment_boundaries: Segment boundaries from Phase 2 for n-gram containment scoring (optional)
 
     Returns:
         Dictionary with extracted components and metadata
@@ -904,7 +955,8 @@ def extract_with_database(
         district_known=district_known,
         max_branches=5,
         phase2_segments=phase2_segments or [],
-        delimiter_info=delimiter_info
+        delimiter_info=delimiter_info,
+        segment_boundaries=segment_boundaries  # NEW: Pass segment boundaries
     )
 
     if not candidates:
@@ -1719,7 +1771,8 @@ def extract_province_candidates(
     tokens: List[str],
     province_known: Optional[str] = None,
     fuzzy_threshold: float = 0.90,
-    delimiter_info: Optional[Dict] = None
+    delimiter_info: Optional[Dict] = None,
+    segment_boundaries: Optional[List[Tuple[int, int]]] = None  # NEW: From Phase 2
 ) -> List[Tuple[str, float, str, bool]]:
     """
     Extract province candidates from multiple sources (mimics human reading).
@@ -1733,6 +1786,8 @@ def extract_province_candidates(
         tokens: List of normalized tokens
         province_known: Known province value (optional, trusted 100%)
         fuzzy_threshold: Minimum fuzzy score for full scan (default: 0.6)
+        delimiter_info: Delimiter info from Phase 1 (optional)
+        segment_boundaries: Segment boundaries from Phase 2 for n-gram containment scoring (optional)
 
     Returns:
         List of (province_name, score, source, has_district_collision) tuples, sorted by score DESC
@@ -2854,7 +2909,8 @@ def build_search_tree(
     district_known: Optional[str] = None,
     max_branches: int = 5,
     phase2_segments: list = None,
-    delimiter_info: Optional[Dict] = None
+    delimiter_info: Optional[Dict] = None,
+    segment_boundaries: Optional[List[Tuple[int, int]]] = None  # NEW: From Phase 2
 ) -> List[Dict]:
     """
     Build multi-branch search tree using hierarchical scoped search.
@@ -2873,6 +2929,8 @@ def build_search_tree(
         district_known: Known district value (optional)
         max_branches: Maximum number of final candidates to return (default: 5)
         phase2_segments: Segments with boost scores from Phase 2 (optional)
+        delimiter_info: Delimiter info from Phase 1 (optional)
+        segment_boundaries: Segment boundaries from Phase 2 for n-gram containment scoring (optional)
 
     Returns:
         List of candidate dictionaries with province, district, ward, scores, and metadata
@@ -2894,6 +2952,8 @@ def build_search_tree(
     logger.debug("[🔍 DEBUG] [PHASE 2] HIERARCHICAL SEARCH")
     logger.debug(f"[🔍 DEBUG]   📥 Tokens: {tokens}")
     logger.debug(f"[🔍 DEBUG]   📝 Known: province={province_known or 'None'}, district={district_known or 'None'}")
+    if segment_boundaries:
+        logger.debug(f"[🔍 DEBUG]   📐 Segment boundaries: {segment_boundaries}")
 
     # Build boost lookup map from Phase 2 segments
     # Map: segment_text → boost_score
@@ -2913,7 +2973,13 @@ def build_search_tree(
     # STEP 1: Extract province candidates
     from ..config import FUZZY_THRESHOLDS
     logger.debug("\n[🔍 DEBUG]   [STEP 1] PROVINCE EXTRACTION")
-    province_candidates = extract_province_candidates(tokens, province_known, fuzzy_threshold=FUZZY_THRESHOLDS['province'], delimiter_info=delimiter_info)
+    province_candidates = extract_province_candidates(
+        tokens, 
+        province_known, 
+        fuzzy_threshold=FUZZY_THRESHOLDS['province'], 
+        delimiter_info=delimiter_info,
+        segment_boundaries=segment_boundaries  # NEW: Pass segment boundaries
+    )
 
     # Apply penalty to abbreviations if exact matches exist
     # This prevents "dn" from overshadowing "da nang" if both appear in text

@@ -77,6 +77,12 @@ DELIMITER_CHARS = [',', '-', '_', '/']  # Characters treated as delimiters
 DELIMITER_CROSS_PENALTY = 0.85  # 15% penalty when n-gram crosses delimiter boundary
 DELIMITER_WITHIN_BONUS = 1.10  # 10% bonus when n-gram is fully within segment
 
+# Segment containment scoring (Phase 2 structural integration)
+# When address has delimiters (comma, dash), segments are identified
+# N-grams fully within a segment get bonus, cross-boundary gets penalty
+SEGMENT_CONTAINMENT_BONUS = 1.20    # +20% for n-grams fully within segment
+SEGMENT_CROSS_PENALTY = 0.85        # -15% for n-grams crossing segment boundaries
+
 # Slash handling in address numbers (e.g., "55/2 Nguyen Trai")
 # Slash is kept as part of token when it's between digits
 SLASH_NUMBER_PATTERN = r'\d+/\d+'  # Pattern to detect address numbers with slash

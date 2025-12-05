@@ -20,7 +20,8 @@ def extract_components(
     preprocessed: Dict[str, Any],
     province_known: Optional[str] = None,
     district_known: Optional[str] = None,
-    phase2_segments: list = None
+    phase2_segments: list = None,
+    segment_boundaries: list = None  # NEW: From Phase 2 structural parsing
 ) -> Dict[str, Any]:
     """
     Extract components and generate LOCAL candidates from database.
@@ -28,15 +29,17 @@ def extract_components(
     Phase 3 Responsibilities:
     1. Extract potentials from normalized text via n-gram matching
     2. Apply boost scores from Phase 2 (delimiter/keyword bonuses)
-    3. Generate all valid candidate combinations from potentials
-    4. Validate hierarchy for each candidate
-    5. Return ranked candidates ready for Phase 4
+    3. Apply segment containment scoring (NEW: within-segment bonus, cross-boundary penalty)
+    4. Generate all valid candidate combinations from potentials
+    5. Validate hierarchy for each candidate
+    6. Return ranked candidates ready for Phase 4
 
     Args:
         preprocessed: Output from Phase 1 preprocessing
         province_known: Known province from raw data (optional, trusted 100%)
         district_known: Known district from raw data (optional, trusted 100%)
         phase2_segments: Segments with boost scores from Phase 2 (optional)
+        segment_boundaries: Segment boundaries from Phase 2 for n-gram containment scoring (optional)
 
     Returns:
         Dictionary containing:
@@ -83,6 +86,8 @@ def extract_components(
     # Log entry with token count
     tokens = normalized_text.split() if normalized_text else []
     logger.debug(f"[PHASE 3] Starting extraction with {len(tokens)} tokens: {tokens}")
+    if segment_boundaries:
+        logger.debug(f"[PHASE 3] Using segment boundaries: {segment_boundaries}")
 
     if not normalized_text:
         logger.debug("[PHASE 3] No normalized text to extract")
@@ -122,7 +127,8 @@ def extract_components(
         district_known=dist_known_norm,
         original_text_for_matching=original_text_for_matching,
         phase2_segments=phase2_segments or [],
-        delimiter_info=delimiter_info
+        delimiter_info=delimiter_info,
+        segment_boundaries=segment_boundaries  # NEW: Pass segment boundaries for scoring
     )
     
     # Log extraction results

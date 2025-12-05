@@ -182,11 +182,13 @@ class AddressPipeline:
 
             # Phase 3: Always run n-gram extraction with DB validation
             # Pass Phase 2 segments to apply boost scores during matching
+            # Pass segment_boundaries for n-gram containment scoring (NEW)
             phase3_result = phase3_extraction.extract_components(
                 phase1_result,
                 province_known=province_known,
                 district_known=district_known,
-                phase2_segments=phase2_result.get('segments', [])
+                phase2_segments=phase2_result.get('segments', []),
+                segment_boundaries=phase2_result.get('segment_boundaries')  # NEW: From Phase 2
             )
             phase_results['phase3'] = phase3_result
 
