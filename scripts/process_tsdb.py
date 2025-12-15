@@ -284,7 +284,7 @@ def main():
     # Concatenate 4 columns as raw address (separated by comma)
     def concat_address(row):
         parts = []
-        for col in ['Dia_chi_TSDB',	'Duong',	'Phuong',	'Quan',	'Tinh']:
+        for col in ['New_Dia_chi_TSDB',	'New_Duong',	'New_Phuong',	'New_Quan',	'enrich_Tinh']:
             val = row[col]
             if val and not pd.isna(val) and str(val).strip():
                 parts.append(str(val).strip())
