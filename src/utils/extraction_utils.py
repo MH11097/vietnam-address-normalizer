@@ -165,7 +165,7 @@ def lookup_full_names(
         query = """
         SELECT DISTINCT province_full
         FROM admin_divisions
-        WHERE province_name_normalized = ?
+        WHERE province_name_normalized = %s
         LIMIT 1
         """
         prov_result = query_one(query, (province,))
@@ -2360,7 +2360,7 @@ def extract_district_scoped(
         wards_data = query_all("""
             SELECT DISTINCT ward_name_normalized
             FROM admin_divisions
-            WHERE province_name_normalized = ?
+            WHERE province_name_normalized = %s
         """, (province_context,))
         wards_set = {w['ward_name_normalized'] for w in wards_data if w['ward_name_normalized']}
 
@@ -2664,7 +2664,7 @@ def extract_ward_scoped(
         wards_data = query_all("""
             SELECT DISTINCT ward_full, ward_name, ward_name_normalized
             FROM admin_divisions
-            WHERE province_name_normalized = ?
+            WHERE province_name_normalized = %s
         """, (province_context,))
 
     wards_set = {w['ward_name_normalized'] for w in wards_data}

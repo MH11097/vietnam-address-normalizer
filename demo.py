@@ -165,7 +165,7 @@ def load_samples(limit=3, offset=0, random=False):
             AND COALESCE(u.known_district, '') = COALESCE(r.ten_quan_huyen_thuong_tru, '')
       )
     {order_clause}
-    LIMIT ? OFFSET ?
+    LIMIT %s OFFSET %s
     """
 
     return query_all(query, (limit, offset))
@@ -190,14 +190,14 @@ def load_rated_samples(ratings, limit=3):
         }
     """
     # Build placeholders for IN clause
-    placeholders = ','.join(['?' for _ in ratings])
+    placeholders = ','.join(['%s' for _ in ratings])
 
     query = f"""
     SELECT id, cif_no, original_address, known_province, known_district
     FROM user_quality_ratings
     WHERE user_rating IN ({placeholders})
     ORDER BY RANDOM()
-    LIMIT ?
+    LIMIT %s
     """
 
     params = tuple(ratings) + (limit,)
