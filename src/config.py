@@ -2,6 +2,11 @@
 Configuration settings for address parsing.
 """
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 
 # Base paths
@@ -11,6 +16,16 @@ OUTPUT_DIR = BASE_DIR / 'output'
 
 # Database
 DB_PATH = DATA_DIR / 'address.db'
+
+# PostgreSQL Configuration
+PG_CONFIG = {
+    'host': os.getenv('PG_HOST'),
+    'port': int(os.getenv('PG_PORT', 5432)),
+    'database': os.getenv('PG_DATABASE'),
+    'user': os.getenv('PG_USER'),
+    'password': os.getenv('PG_PASSWORD'),
+    'connect_timeout': 10,
+}
 
 # Data files (deprecated - now use database)
 HELPER_FILE = DATA_DIR / 'merge_file3.csv'

@@ -1,8 +1,9 @@
 """
-Database utilities for SQLite operations.
+Database utilities for PostgreSQL operations.
 Provides connection management, query helpers, and data loading.
 """
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import time
 import logging
 from datetime import datetime
@@ -21,22 +22,32 @@ DB_PATH = Path(__file__).parent.parent.parent / 'data' / 'address.db'
 @contextmanager
 def get_db_connection(db_path: Path = DB_PATH):
     """
-    Context manager for database connections.
+    Context manager for PostgreSQL database connections.
     Automatically handles connection close and commit.
 
     Args:
-        db_path: Path to SQLite database file
+        db_path: Deprecated parameter (kept for backward compatibility)
 
     Yields:
-        sqlite3.Connection object
+        psycopg2.connection object with RealDictCursor
 
     Example:
         >>> with get_db_connection() as conn:
         ...     cursor = conn.cursor()
         ...     cursor.execute("SELECT * FROM admin_divisions LIMIT 1")
     """
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row  # Enable column access by name
+    from ..config import PG_CONFIG
+
+    # Connect to PostgreSQL using credentials from config
+    conn = psycopg2.connect(
+        host=PG_CONFIG['host'],
+        port=PG_CONFIG['port'],
+        database=PG_CONFIG['database'],
+        user=PG_CONFIG['user'],
+        password=PG_CONFIG['password'],
+        connect_timeout=PG_CONFIG['connect_timeout'],
+        cursor_factory=RealDictCursor  # Return rows as dictionaries
+    )
     try:
         yield conn
         conn.commit()
@@ -59,7 +70,7 @@ def query_one(query: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
         Dictionary with column names as keys, or None if no result
 
     Example:
-        >>> query_one("SELECT * FROM admin_divisions WHERE id = ?", (1,))
+        >>> query_one("SELECT * FROM admin_divisions WHERE id = %s", (1,))
         {'id': 1, 'province_full': 'THÀNH PHỐ HÀ NỘI', ...}
     """
     from ..config import DEBUG_SQL
@@ -142,7 +153,7 @@ def execute_query(query: str, params: tuple = ()) -> int:
         Number of rows affected
 
     Example:
-        >>> execute_query("UPDATE admin_divisions SET province_name_normalized = ? WHERE id = ?", ('ha noi', 1))
+        >>> execute_query("UPDATE admin_divisions SET province_name_normalized = %s WHERE id = %s", ('ha noi', 1))
         1
     """
     with get_db_connection() as conn:
@@ -200,7 +211,7 @@ def load_abbreviations(
     if province_context:
         query_province = """
             SELECT key, word FROM abbreviations
-            WHERE province_context = ? AND district_context IS NULL
+            WHERE province_context = %s AND district_context IS NULL
         """
         rows_province = query_all(query_province, (province_context,))
         for row in rows_province:
@@ -210,7 +221,7 @@ def load_abbreviations(
         if district_context:
             query_district = """
                 SELECT key, word FROM abbreviations
-                WHERE province_context = ? AND district_context = ?
+                WHERE province_context = %s AND district_context = %s
             """
             rows_district = query_all(query_district, (province_context, district_context))
             for row in rows_district:
@@ -255,17 +266,17 @@ def expand_abbreviation_from_admin(
 
     # Query abbreviations table with context
     # Note: We don't filter by level anymore since abbreviations table stores all levels
-    conditions = ["key = ?"]
+    conditions = ["key = %s"]
     params = [abbr]
 
     if province_context and district_context:
         # Most specific: ward level
-        conditions.append("province_context = ?")
-        conditions.append("district_context = ?")
+        conditions.append("province_context = %s")
+        conditions.append("district_context = %s")
         params.extend([province_context, district_context])
     elif province_context:
         # District level
-        conditions.append("province_context = ?")
+        conditions.append("province_context = %s")
         conditions.append("district_context IS NULL")
         params.append(province_context)
     else:
@@ -316,7 +327,7 @@ def get_province_abbreviation_candidates(abbr: str) -> List[Tuple[str, str]]:
     # Query abbreviations table for province-level (province_context=NULL)
     query = """
         SELECT word, key FROM abbreviations
-        WHERE key = ?
+        WHERE key = %s
         AND province_context IS NULL
         AND district_context IS NULL
         ORDER BY word
@@ -465,13 +476,13 @@ def find_exact_match(
     params = []
 
     if province:
-        conditions.append("province_name_normalized = ?")
+        conditions.append("province_name_normalized = %s")
         params.append(province)
     if district:
-        conditions.append("district_name_normalized = ?")
+        conditions.append("district_name_normalized = %s")
         params.append(district)
     if ward:
-        conditions.append("ward_name_normalized = ?")
+        conditions.append("ward_name_normalized = %s")
         params.append(ward)
 
     # IMPORTANT: Require at least 2 conditions to prevent random results
@@ -542,11 +553,11 @@ def get_candidates_scoped(
     params = []
 
     if province_known:
-        conditions.append("province_name_normalized = ?")
+        conditions.append("province_name_normalized = %s")
         params.append(province_known)
 
     if district_known:
-        conditions.append("district_name_normalized = ?")
+        conditions.append("district_name_normalized = %s")
         params.append(district_known)
 
     if not conditions:
@@ -594,14 +605,14 @@ def validate_hierarchy(
             components.append(ward)
         logger.debug(f"[SQL] validate_hierarchy({' > '.join(components)})")
 
-    conditions = ["province_name_normalized = ?"]
+    conditions = ["province_name_normalized = %s"]
     params = [province]
 
     if district:
-        conditions.append("district_name_normalized = ?")
+        conditions.append("district_name_normalized = %s")
         params.append(district)
     if ward:
-        conditions.append("ward_name_normalized = ?")
+        conditions.append("ward_name_normalized = %s")
         params.append(ward)
 
     query = f"""
@@ -639,7 +650,7 @@ def get_districts_by_province(province: str) -> List[Dict[str, Any]]:
         district_name,
         district_name_normalized
     FROM admin_divisions
-    WHERE province_name_normalized = ?
+    WHERE province_name_normalized = %s
     """
     return query_all(query, (province,))
 
@@ -677,7 +688,7 @@ def check_province_district_collision(name: str) -> Dict[str, Any]:
     province_query = """
     SELECT DISTINCT province_name_normalized, province_full
     FROM admin_divisions
-    WHERE province_name_normalized = ?
+    WHERE province_name_normalized = %s
     LIMIT 1
     """
     province_result = query_all(province_query, (name,))
@@ -689,7 +700,7 @@ def check_province_district_collision(name: str) -> Dict[str, Any]:
         district_full,
         province_name_normalized
     FROM admin_divisions
-    WHERE district_name_normalized = ?
+    WHERE district_name_normalized = %s
     LIMIT 1
     """
     district_result = query_all(district_query, (name,))
@@ -728,8 +739,8 @@ def get_wards_by_district(province: str, district: str) -> List[Dict[str, Any]]:
         ward_name,
         ward_name_normalized
     FROM admin_divisions
-    WHERE province_name_normalized = ?
-      AND district_name_normalized = ?
+    WHERE province_name_normalized = %s
+      AND district_name_normalized = %s
     """
     return query_all(query, (province, district))
 
@@ -762,8 +773,8 @@ def get_all_districts_for_ward(province: str, ward: str) -> List[str]:
     query = """
     SELECT DISTINCT district_name_normalized
     FROM admin_divisions
-    WHERE province_name_normalized = ?
-      AND ward_name_normalized = ?
+    WHERE province_name_normalized = %s
+      AND ward_name_normalized = %s
     ORDER BY district_name_normalized
     """
 
@@ -794,8 +805,8 @@ def get_streets_by_district(province: str, district: str) -> List[Dict[str, Any]
         district_name_normalized,
         district_full
     FROM admin_streets
-    WHERE province_name_normalized = ?
-      AND district_name_normalized = ?
+    WHERE province_name_normalized = %s
+      AND district_name_normalized = %s
     """
     return query_all(query, (province, district))
 
@@ -832,8 +843,8 @@ def get_streets_by_province(province: str, street: Optional[str] = None) -> List
             province_name_normalized,
             province_full
         FROM admin_streets
-        WHERE province_name_normalized = ?
-          AND street_name_normalized = ?
+        WHERE province_name_normalized = %s
+          AND street_name_normalized = %s
         """
         return query_all(query, (province, street))
     else:
@@ -846,7 +857,7 @@ def get_streets_by_province(province: str, street: Optional[str] = None) -> List
             province_name_normalized,
             province_full
         FROM admin_streets
-        WHERE province_name_normalized = ?
+        WHERE province_name_normalized = %s
         """
         return query_all(query, (province,))
 
@@ -872,8 +883,8 @@ def infer_district_from_ward(province: str, ward: str) -> Optional[str]:
     query = """
     SELECT DISTINCT district_name_normalized
     FROM admin_divisions
-    WHERE province_name_normalized = ?
-      AND ward_name_normalized = ?
+    WHERE province_name_normalized = %s
+      AND ward_name_normalized = %s
     LIMIT 1
     """
     result = query_one(query, (province, ward))
@@ -900,7 +911,7 @@ def infer_province_from_district(district: str) -> Optional[str]:
     query = """
     SELECT DISTINCT province_name_normalized
     FROM admin_divisions
-    WHERE district_name_normalized = ?
+    WHERE district_name_normalized = %s
     LIMIT 1
     """
     result = query_one(query, (district,))
@@ -932,14 +943,14 @@ def find_street_match(
     if not street:
         return None
 
-    conditions = ["street_name_normalized = ?"]
+    conditions = ["street_name_normalized = %s"]
     params = [street]
 
     if province:
-        conditions.append("province_name_normalized = ?")
+        conditions.append("province_name_normalized = %s")
         params.append(province)
     if district:
-        conditions.append("district_name_normalized = ?")
+        conditions.append("district_name_normalized = %s")
         params.append(district)
 
     query = f"""
@@ -1025,19 +1036,19 @@ def save_user_rating(rating_data: Dict[str, Any]) -> int:
         # Use COALESCE to match both NULL and empty string values
         update_query = """
         UPDATE user_quality_ratings
-        SET timestamp = ?,
-            cif_no = ?,
-            parsed_province = ?,
-            parsed_district = ?,
-            parsed_ward = ?,
-            confidence_score = ?,
-            user_rating = ?,
-            processing_time_ms = ?,
-            match_type = ?,
-            session_id = ?
-        WHERE original_address = ?
-            AND COALESCE(known_province, '') = ?
-            AND COALESCE(known_district, '') = ?
+        SET timestamp = %s,
+            cif_no = %s,
+            parsed_province = %s,
+            parsed_district = %s,
+            parsed_ward = %s,
+            confidence_score = %s,
+            user_rating = %s,
+            processing_time_ms = %s,
+            match_type = %s,
+            session_id = %s
+        WHERE original_address = %s
+            AND COALESCE(known_province, '') = %s
+            AND COALESCE(known_district, '') = %s
         """
 
         update_params = (
@@ -1065,7 +1076,8 @@ def save_user_rating(rating_data: Dict[str, Any]) -> int:
                 timestamp, cif_no, original_address, known_province, known_district,
                 parsed_province, parsed_district, parsed_ward, confidence_score,
                 user_rating, processing_time_ms, match_type, session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
             """
 
             insert_params = (
@@ -1085,11 +1097,12 @@ def save_user_rating(rating_data: Dict[str, Any]) -> int:
             )
 
             cursor.execute(insert_query, insert_params)
-            return cursor.lastrowid
+            result = cursor.fetchone()
+            return result['id'] if result else None
         else:
             # Return the ID of the updated record
             cursor.execute(
-                "SELECT id FROM user_quality_ratings WHERE original_address = ? AND COALESCE(known_province, '') = ? AND COALESCE(known_district, '') = ?",
+                "SELECT id FROM user_quality_ratings WHERE original_address = %s AND COALESCE(known_province, '') = %s AND COALESCE(known_district, '') = %s",
                 (original_address, known_province, known_district)
             )
             return cursor.fetchone()[0]
@@ -1207,9 +1220,9 @@ def get_review_records(user_rating_filter: Optional[int] = None, limit: int = 20
                 r.parsed_ward
             ) as parsed_ward_full
         FROM user_quality_ratings r
-        WHERE r.user_rating = ?
+        WHERE r.user_rating = %s
         ORDER BY r.timestamp DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
         """
         return query_all(query, (user_rating_filter, limit, offset))
     else:
@@ -1240,7 +1253,7 @@ def get_review_records(user_rating_filter: Optional[int] = None, limit: int = 20
             ) as parsed_ward_full
         FROM user_quality_ratings r
         ORDER BY r.timestamp DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
         """
         return query_all(query, (limit, offset))
 
@@ -1267,9 +1280,9 @@ def update_existing_rating(record_id: int, new_rating: int) -> bool:
 
     query = """
     UPDATE user_quality_ratings
-    SET user_rating = ?,
-        timestamp = ?
-    WHERE id = ?
+    SET user_rating = %s,
+        timestamp = %s
+    WHERE id = %s
     """
 
     rows_affected = execute_query(query, (new_rating, datetime.now().isoformat(), record_id))
@@ -1366,16 +1379,16 @@ def get_new_addresses_for_old_ward(
         {'new_province': 'Thành phố Hà Nội', 'new_ward': 'Phường Ba Đình', 'note': 'Nhập toàn bộ'}
     """
     query = """
-        SELECT DISTINCT new_province, new_ward, note
+        SELECT new_province, new_ward, note
         FROM admin_division_migration
-        WHERE old_province = ?
-          AND old_district = ?
-          AND old_ward = ?
+        WHERE old_province = %s
+          AND old_district = %s
+          AND old_ward = %s
         ORDER BY
             CASE
-                WHEN note LIKE '%Nhập toàn bộ%' THEN 1
-                WHEN note LIKE '%Đổi tên%' THEN 2
-                WHEN note LIKE '%Giữ nguyên%' THEN 3
+                WHEN note LIKE '%%Nhập toàn bộ%%' THEN 1
+                WHEN note LIKE '%%Đổi tên%%' THEN 2
+                WHEN note LIKE '%%Giữ nguyên%%' THEN 3
                 ELSE 4
             END,
             new_ward
@@ -1407,15 +1420,15 @@ def get_new_addresses_for_old_district(
         15  # All wards from Quận Ba Đình → multiple new_ward destinations
     """
     query = """
-        SELECT DISTINCT new_province, new_ward, note
+        SELECT new_province, new_ward, note
         FROM admin_division_migration
-        WHERE old_province = ?
-          AND old_district = ?
+        WHERE old_province = %s
+          AND old_district = %s
         ORDER BY
             CASE
-                WHEN note LIKE '%Nhập toàn bộ%' THEN 1
-                WHEN note LIKE '%Đổi tên%' THEN 2
-                WHEN note LIKE '%Giữ nguyên%' THEN 3
+                WHEN note LIKE '%%Nhập toàn bộ%%' THEN 1
+                WHEN note LIKE '%%Đổi tên%%' THEN 2
+                WHEN note LIKE '%%Giữ nguyên%%' THEN 3
                 ELSE 4
             END,
             new_ward
@@ -1441,26 +1454,30 @@ def get_new_addresses_for_old_province(old_province: str) -> List[Dict[str, Any]
         {'new_province': 'Thành phố Hải Phòng', 'note': 'Nhập toàn bộ'}
     """
     query = """
-        SELECT DISTINCT
+        SELECT
             new_province,
             CASE
                 WHEN COUNT(DISTINCT old_ward) =
                      (SELECT COUNT(DISTINCT old_ward)
                       FROM admin_division_migration
-                      WHERE old_province = ?)
+                      WHERE old_province = %s)
                 THEN 'Nhập toàn bộ'
                 ELSE 'Nhập một phần'
             END as note
         FROM admin_division_migration
-        WHERE old_province = ?
+        WHERE old_province = %s
         GROUP BY new_province
         ORDER BY
             CASE
-                WHEN note LIKE '%Nhập toàn bộ%' THEN 1
+                WHEN COUNT(DISTINCT old_ward) =
+                     (SELECT COUNT(DISTINCT old_ward)
+                      FROM admin_division_migration
+                      WHERE old_province = %s)
+                THEN 1
                 ELSE 2
             END
     """
-    return query_all(query, (old_province, old_province))
+    return query_all(query, (old_province, old_province, old_province))
 
 
 if __name__ == "__main__":

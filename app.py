@@ -36,7 +36,7 @@ def start_review_session():
 
     query = """
     INSERT INTO review_sessions (session_id, start_time, status)
-    VALUES (?, ?, 'active')
+    VALUES (%s, %s, 'active')
     """
     execute_query(query, (session_id, datetime.now().isoformat()))
 
@@ -66,7 +66,7 @@ def get_current_session_stats():
     SELECT session_id, total_reviews, rating_1_count, rating_2_count,
            rating_3_count, accuracy_rate, status
     FROM review_sessions
-    WHERE session_id = ?
+    WHERE session_id = %s
     """
     result = query_one(query, (session_id,))
 
@@ -96,7 +96,7 @@ def update_session_stats(session_id, rating):
     UPDATE review_sessions
     SET total_reviews = total_reviews + 1,
         {rating_col} = {rating_col} + 1
-    WHERE session_id = ?
+    WHERE session_id = %s
     """
     execute_query(query, (session_id,))
 
@@ -104,7 +104,7 @@ def update_session_stats(session_id, rating):
     query = """
     UPDATE review_sessions
     SET accuracy_rate = CAST((rating_1_count + rating_2_count) AS REAL) / total_reviews * 100
-    WHERE session_id = ? AND total_reviews > 0
+    WHERE session_id = %s AND total_reviews > 0
     """
     execute_query(query, (session_id,))
 
@@ -123,8 +123,8 @@ def complete_review_session(session_id):
     query = """
     UPDATE review_sessions
     SET status = 'completed',
-        end_time = ?
-    WHERE session_id = ?
+        end_time = %s
+    WHERE session_id = %s
     """
     execute_query(query, (datetime.now().isoformat(), session_id))
 
@@ -142,7 +142,7 @@ def load_random_sample(province_filter=None):
         FROM raw_addresses
         WHERE dia_chi_thuong_tru IS NOT NULL
           AND dia_chi_thuong_tru != ''
-          AND ten_tinh_thuong_tru = ?
+          AND ten_tinh_thuong_tru = %s
         ORDER BY RANDOM()
         LIMIT 1
         """
@@ -394,7 +394,7 @@ def get_districts():
         FROM raw_addresses
         WHERE ten_quan_huyen_thuong_tru IS NOT NULL
           AND ten_quan_huyen_thuong_tru != ''
-          AND ten_tinh_thuong_tru = ?
+          AND ten_tinh_thuong_tru = %s
         ORDER BY ten_quan_huyen_thuong_tru
         """
         districts = query_all(query, (province,))
@@ -594,7 +594,7 @@ def get_review_records_api():
 
         # Get total count for pagination
         if user_rating_filter is not None:
-            count_query = "SELECT COUNT(*) as total FROM user_quality_ratings WHERE user_rating = ?"
+            count_query = "SELECT COUNT(*) as total FROM user_quality_ratings WHERE user_rating = %s"
             count_result = query_one(count_query, (user_rating_filter,))
         else:
             count_query = "SELECT COUNT(*) as total FROM user_quality_ratings"
